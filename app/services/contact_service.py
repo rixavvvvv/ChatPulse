@@ -118,3 +118,51 @@ async def import_contacts_from_csv(
             skipped += 1
 
     return ContactUploadResponse(contacts_added=added, contacts_skipped=skipped)
+
+
+async def create_contact(
+    session: AsyncSession,
+    workspace_id: int,
+    name: str,
+    phone: str,
+    tags: list[str] | None = None,
+) -> Contact:
+    normalized_phone = normalize_phone(phone)
+    if not normalized_phone:
+        raise ValueError("Invalid phone number format. Use E.164 style like +14155550101")
+
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Contact name is required")
+
+    normalized_tags = [tag.strip() for tag in (tags or []) if tag.strip()]
+
+    contact = Contact(
+        workspace_id=workspace_id,
+        name=normalized_name,
+        phone=normalized_phone,
+        tags=normalized_tags,
+    )
+    session.add(contact)
+
+    try:
+        await session.commit()
+        await session.refresh(contact)
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError("Contact with this phone already exists in the workspace") from exc
+
+    return contact
+
+
+async def list_contacts(
+    session: AsyncSession,
+    workspace_id: int,
+) -> list[Contact]:
+    stmt = (
+        select(Contact)
+        .where(Contact.workspace_id == workspace_id)
+        .order_by(Contact.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())

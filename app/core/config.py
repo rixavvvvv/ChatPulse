@@ -17,6 +17,10 @@ class Settings(BaseSettings):
         default=60,
         alias="ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    super_admin_email: str | None = Field(
+        default=None,
+        alias="SUPER_ADMIN_EMAIL",
+    )
     whatsapp_provider: str = Field(
         default="simulation", alias="WHATSAPP_PROVIDER")
     whatsapp_phone_number_id: str | None = Field(
@@ -39,6 +43,18 @@ class Settings(BaseSettings):
         default=15.0,
         alias="META_API_TIMEOUT_SECONDS",
     )
+    meta_webhook_verify_token: str = Field(
+        default="change-this-webhook-token",
+        alias="META_WEBHOOK_VERIFY_TOKEN",
+    )
+    meta_app_secret: str | None = Field(
+        default=None,
+        alias="META_APP_SECRET",
+    )
+    public_base_url: str | None = Field(
+        default=None,
+        alias="PUBLIC_BASE_URL",
+    )
     redis_url: str = Field(
         default="redis://localhost:6379/0",
         alias="REDIS_URL",
@@ -50,6 +66,30 @@ class Settings(BaseSettings):
     celery_result_ttl_seconds: int = Field(
         default=86400,
         alias="CELERY_RESULT_TTL_SECONDS",
+    )
+    queue_retry_max_attempts: int = Field(
+        default=4,
+        alias="QUEUE_RETRY_MAX_ATTEMPTS",
+    )
+    queue_retry_base_delay_seconds: int = Field(
+        default=2,
+        alias="QUEUE_RETRY_BASE_DELAY_SECONDS",
+    )
+    queue_idempotency_ttl_seconds: int = Field(
+        default=604800,
+        alias="QUEUE_IDEMPOTENCY_TTL_SECONDS",
+    )
+    queue_inflight_ttl_seconds: int = Field(
+        default=120,
+        alias="QUEUE_INFLIGHT_TTL_SECONDS",
+    )
+    queue_workspace_rate_limit_count: int = Field(
+        default=20,
+        alias="QUEUE_WORKSPACE_RATE_LIMIT_COUNT",
+    )
+    queue_workspace_rate_limit_window_seconds: int = Field(
+        default=1,
+        alias="QUEUE_WORKSPACE_RATE_LIMIT_WINDOW_SECONDS",
     )
     meta_credentials_encryption_key: str = Field(
         default="change-this-meta-encryption-key",
@@ -89,6 +129,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ACCESS_TOKEN_EXPIRE_MINUTES must be greater than 0")
         return value
+
+    @field_validator("super_admin_email")
+    @classmethod
+    def validate_super_admin_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        return normalized
 
     @field_validator("whatsapp_provider")
     @classmethod
@@ -130,6 +180,39 @@ class Settings(BaseSettings):
             raise ValueError("META_API_TIMEOUT_SECONDS must be greater than 0")
         return value
 
+    @field_validator("meta_webhook_verify_token")
+    @classmethod
+    def validate_meta_webhook_verify_token(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 8:
+            raise ValueError(
+                "META_WEBHOOK_VERIFY_TOKEN must be at least 8 characters")
+        return normalized
+
+    @field_validator("meta_app_secret")
+    @classmethod
+    def validate_meta_app_secret(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if len(normalized) < 16:
+            raise ValueError("META_APP_SECRET must be at least 16 characters")
+        return normalized
+
+    @field_validator("public_base_url")
+    @classmethod
+    def validate_public_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().rstrip("/")
+        if not normalized:
+            return None
+        if not normalized.startswith(("http://", "https://")):
+            raise ValueError("PUBLIC_BASE_URL must start with http:// or https://")
+        return normalized
+
     @field_validator("redis_url")
     @classmethod
     def validate_redis_url(cls, value: str) -> str:
@@ -152,6 +235,20 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError(
                 "CELERY_RESULT_TTL_SECONDS must be greater than 0")
+        return value
+
+    @field_validator(
+        "queue_retry_max_attempts",
+        "queue_retry_base_delay_seconds",
+        "queue_idempotency_ttl_seconds",
+        "queue_inflight_ttl_seconds",
+        "queue_workspace_rate_limit_count",
+        "queue_workspace_rate_limit_window_seconds",
+    )
+    @classmethod
+    def validate_positive_queue_settings(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Queue numeric settings must be greater than 0")
         return value
 
 

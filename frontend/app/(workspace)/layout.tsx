@@ -1,13 +1,28 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Menu, Search } from "lucide-react";
 
 import { SidebarNav } from "@/components/sidebar-nav";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { getSession } from "@/lib/session";
 
 export default function WorkspaceLayout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
+    const router = useRouter();
+
+    useEffect(() => {
+        const session = getSession();
+        if (!session) {
+            router.replace("/login");
+        }
+    }, [router]);
+
     return (
         <div className="min-h-screen">
             <SidebarNav />
@@ -24,13 +39,7 @@ export default function WorkspaceLayout({
                     </div>
 
                     <div className="ml-6 flex items-center gap-3">
-                        <div className="text-right">
-                            <p className="text-sm font-semibold text-slate-900">Ava Morrison</p>
-                            <p className="text-xs text-slate-500">Operations Lead</p>
-                        </div>
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-sky-200 bg-sky-100 font-semibold text-sky-900">
-                            AM
-                        </div>
+                        <WorkspaceSwitcher />
                     </div>
                 </div>
             </header>
@@ -39,8 +48,14 @@ export default function WorkspaceLayout({
                 <div className="container flex items-center justify-between py-4">
                     <p className="font-[var(--font-space-grotesk)] text-lg font-semibold">Bulk Messaging</p>
                     <div className="flex items-center gap-2">
+                        <Link href="/onboarding" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                            Onboarding
+                        </Link>
                         <Link href="/dashboard" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                             Dashboard
+                        </Link>
+                        <Link href="/campaigns" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                            Campaigns
                         </Link>
                         <Link href="/contacts" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                             Contacts

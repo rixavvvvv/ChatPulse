@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ContactRound, LayoutDashboard, Megaphone } from "lucide-react";
+import { ContactRound, LayoutDashboard, Megaphone, Rocket, Workflow } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -13,9 +13,19 @@ const navItems = [
         icon: LayoutDashboard,
     },
     {
+        href: "/onboarding",
+        label: "Onboarding",
+        icon: Rocket,
+    },
+    {
         href: "/contacts",
         label: "Contacts",
         icon: ContactRound,
+    },
+    {
+        href: "/campaigns",
+        label: "Campaign Builder",
+        icon: Workflow,
     },
     {
         href: "/bulk-messaging",

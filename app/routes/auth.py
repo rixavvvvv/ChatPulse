@@ -2,13 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db import get_db_session
 from app.dependencies.auth import get_current_user
 from app.dependencies.workspace import get_current_workspace
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.workspace import Workspace
 from app.schemas.auth import LoginRequest, SignupRequest, TokenResponse, UserResponse
 from app.services.auth_service import authenticate_user, create_access_token, hash_password
+from app.services.subscription_service import get_plan_by_name, upsert_user_subscription
 from app.services.user_service import create_user, get_user_by_email
 from app.services.workspace_service import (
     build_default_workspace_name,
@@ -17,6 +19,7 @@ from app.services.workspace_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+settings = get_settings()
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -32,16 +35,34 @@ async def signup(
         )
 
     try:
+        role = UserRole.user
+        if settings.super_admin_email and payload.email.lower() == settings.super_admin_email:
+            role = UserRole.super_admin
+
         user = await create_user(
             session=session,
             email=payload.email,
             password_hash=hash_password(payload.password),
+            role=role,
+            subscription_plan="free",
+            is_active=True,
         )
         await create_workspace_with_owner_membership(
             session=session,
             name=build_default_workspace_name(payload.email),
             owner_id=user.id,
         )
+
+        plan = await get_plan_by_name(
+            session=session,
+            name="free",
+        )
+        if plan is not None:
+            await upsert_user_subscription(
+                session=session,
+                user_id=user.id,
+                plan_id=plan.id,
+            )
     except IntegrityError:
         await session.rollback()
         raise HTTPException(
@@ -84,7 +105,11 @@ async def login(
         workspace_id = workspace.id
 
     token = create_access_token(user_id=user.id, workspace_id=workspace_id)
-    return TokenResponse(access_token=token, workspace_id=workspace_id)
+    return TokenResponse(
+        access_token=token,
+        workspace_id=workspace_id,
+        role=UserRole(user.role),
+    )
 
 
 @router.get("/me", response_model=UserResponse)

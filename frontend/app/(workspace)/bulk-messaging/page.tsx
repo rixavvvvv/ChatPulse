@@ -1,36 +1,35 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, SendHorizonal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { apiRequest } from "@/lib/api";
+import { getSession } from "@/lib/session";
 
 type Contact = {
     id: number;
     name: string;
     phone: string;
+    tags: string[];
+    created_at: string;
 };
 
 type BulkSendResult = {
     success_count: number;
     failed_count: number;
+    results: {
+        contact_id: number;
+        phone: string | null;
+        status: string;
+        provider: string | null;
+        message_id: string | null;
+        error: string | null;
+    }[];
 };
-
-const contacts: Contact[] = [
-    { id: 1, name: "Rhea Lawson", phone: "+14155550101" },
-    { id: 2, name: "Jonah Patel", phone: "+14155550102" },
-    { id: 3, name: "Mina Chen", phone: "+14155550103" },
-    { id: 4, name: "Avery Brown", phone: "+14155550104" },
-    { id: 5, name: "Eli Turner", phone: "+14155550105" },
-    { id: 6, name: "Sora Kim", phone: "+14155550106" },
-    { id: 7, name: "Luca Diaz", phone: "+14155550107" },
-    { id: 8, name: "Nina Roy", phone: "+14155550108" },
-    { id: 9, name: "Arjun Shah", phone: "+14155550109" },
-    { id: 10, name: "Noah White", phone: "+14155550110" },
-];
 
 const PAGE_SIZE = 5;
 
@@ -39,6 +38,7 @@ function previewMessage(template: string, name: string) {
 }
 
 export default function BulkMessagingPage() {
+    const [contacts, setContacts] = useState<Contact[]>([]);
     const [messageTemplate, setMessageTemplate] = useState(
         "Hi {{name}}, just checking in with your latest update.",
     );
@@ -46,8 +46,31 @@ export default function BulkMessagingPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const [selectedContactIds, setSelectedContactIds] = useState<number[]>([]);
     const [isSending, setIsSending] = useState(false);
+    const [loadingContacts, setLoadingContacts] = useState(true);
     const [result, setResult] = useState<BulkSendResult | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    const loadContacts = useCallback(async () => {
+        const session = getSession();
+        if (!session) {
+            setLoadingContacts(false);
+            setErrorMessage("Login required to load contacts");
+            return;
+        }
+
+        try {
+            const payload = await apiRequest<Contact[]>("/contacts", {}, session.access_token);
+            setContacts(payload);
+        } catch (err) {
+            setErrorMessage(err instanceof Error ? err.message : "Unable to load contacts");
+        } finally {
+            setLoadingContacts(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        void loadContacts();
+    }, [loadContacts]);
 
     const filteredContacts = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -60,7 +83,7 @@ export default function BulkMessagingPage() {
                 contact.phone.toLowerCase().includes(query)
             );
         });
-    }, [search]);
+    }, [contacts, search]);
 
     const totalPages = Math.max(1, Math.ceil(filteredContacts.length / PAGE_SIZE));
     const safePage = Math.min(currentPage, totalPages);
@@ -72,6 +95,9 @@ export default function BulkMessagingPage() {
 
     const selectedOnPageCount = visibleContacts.filter((contact) => selectedContactIds.includes(contact.id)).length;
     const selectedPreviewContact = contacts.find((contact) => contact.id === selectedContactIds[0]) ?? filteredContacts[0] ?? null;
+    const contactsById = useMemo(() => {
+        return new Map(contacts.map((contact) => [contact.id, contact]));
+    }, [contacts]);
 
     const previewText = previewMessage(messageTemplate, selectedPreviewContact?.name ?? "Contact");
 
@@ -104,36 +130,37 @@ export default function BulkMessagingPage() {
             return;
         }
 
+        const session = getSession();
+        if (!session) {
+            setErrorMessage("Login required to send messages");
+            setResult(null);
+            return;
+        }
+
         setIsSending(true);
         setErrorMessage(null);
 
         try {
-            const response = await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/bulk-send`,
+            const data = await apiRequest<BulkSendResult>(
+                "/bulk-send",
                 {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
                     body: JSON.stringify({
                         message_template: messageTemplate,
                         contact_ids: selectedContactIds,
                     }),
                 },
+                session.access_token,
             );
 
-            if (!response.ok) {
-                throw new Error("Request failed");
-            }
-
-            const data: Partial<BulkSendResult> = await response.json();
             setResult({
                 success_count: data.success_count ?? 0,
                 failed_count: data.failed_count ?? 0,
+                results: Array.isArray(data.results) ? data.results : [],
             });
-        } catch {
-            setResult({ success_count: 0, failed_count: selectedContactIds.length });
-            setErrorMessage("Backend is unavailable. Result shown as failed for selected contacts.");
+        } catch (err) {
+            setResult(null);
+            setErrorMessage(err instanceof Error ? err.message : "Unable to send bulk message");
         } finally {
             setIsSending(false);
         }
@@ -191,6 +218,44 @@ export default function BulkMessagingPage() {
                                 <p className="font-semibold text-slate-900">Last Send Result</p>
                                 <p className="mt-2 text-emerald-700">Success: {result.success_count}</p>
                                 <p className="text-rose-700">Failed: {result.failed_count}</p>
+                                {result.success_count > 0 ? (
+                                    <p className="mt-3 text-xs text-slate-600">
+                                        Provider accepted the successful messages. If the recipient still did not get them,
+                                        check Meta webhook status, recipient eligibility, and 24-hour session/template rules.
+                                    </p>
+                                ) : null}
+                                {result.results.length > 0 ? (
+                                    <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-border bg-white">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Contact</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Message ID / Error</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {result.results.map((item) => {
+                                                    const contact = contactsById.get(item.contact_id);
+                                                    const displayName = contact?.name ?? `Contact #${item.contact_id}`;
+                                                    const statusLabel = item.status === "accepted" ? "Accepted" : "Failed";
+
+                                                    return (
+                                                        <TableRow key={`${item.contact_id}-${item.phone ?? "none"}`}>
+                                                            <TableCell className="font-medium text-slate-900">{displayName}</TableCell>
+                                                            <TableCell className={item.status === "accepted" ? "text-emerald-700" : "text-rose-700"}>
+                                                                {statusLabel}
+                                                            </TableCell>
+                                                            <TableCell className="text-slate-600">
+                                                                {item.message_id ? item.message_id : item.error ?? "-"}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                ) : null}
                             </div>
                         ) : null}
 
@@ -233,10 +298,17 @@ export default function BulkMessagingPage() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {visibleContacts.length === 0 ? (
+                            {loadingContacts ? (
                                 <TableRow>
                                     <TableCell colSpan={3} className="text-center text-muted-foreground">
-                                        No contacts found.
+                                        Loading contacts...
+                                    </TableCell>
+                                </TableRow>
+                            ) : null}
+                            {!loadingContacts && visibleContacts.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                                        No contacts found. Add contacts from the Contacts page first.
                                     </TableCell>
                                 </TableRow>
                             ) : (

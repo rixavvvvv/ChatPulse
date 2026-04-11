@@ -1,8 +1,10 @@
+from datetime import UTC, datetime
+
 from celery.result import AsyncResult
 from kombu.exceptions import OperationalError
 
 from app.queue.celery_app import celery_app
-from app.queue.tasks import process_bulk_send_task
+from app.queue.tasks import process_bulk_send_task, process_campaign_send_task
 from app.schemas.bulk import BulkQueueEnqueueResponse, BulkQueueStatusResponse
 
 
@@ -44,7 +46,52 @@ def enqueue_bulk_send_job(
     )
 
 
-def get_bulk_send_job_status(
+def enqueue_campaign_job(
+    workspace_id: int,
+    campaign_id: int,
+    schedule_at: datetime | None = None,
+) -> BulkQueueEnqueueResponse:
+    try:
+        if schedule_at is not None:
+            normalized_schedule = schedule_at
+            if normalized_schedule.tzinfo is None:
+                normalized_schedule = normalized_schedule.replace(tzinfo=UTC)
+            else:
+                normalized_schedule = normalized_schedule.astimezone(UTC)
+
+            if normalized_schedule <= datetime.now(tz=UTC):
+                task = process_campaign_send_task.delay(
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                )
+            else:
+                task = process_campaign_send_task.apply_async(
+                    kwargs={
+                        "workspace_id": workspace_id,
+                        "campaign_id": campaign_id,
+                    },
+                    eta=normalized_schedule,
+                )
+        else:
+            task = process_campaign_send_task.delay(
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+            )
+    except OperationalError as exc:
+        raise RuntimeError("Queue broker is unavailable") from exc
+    except Exception as exc:
+        raise RuntimeError("Queue broker is unavailable") from exc
+
+    return BulkQueueEnqueueResponse(
+        job_id=_build_scoped_job_id(
+            workspace_id=workspace_id,
+            task_id=task.id,
+        ),
+        status="queued",
+    )
+
+
+def get_scoped_job_status(
     job_id: str,
     workspace_id: int,
 ) -> BulkQueueStatusResponse:
@@ -77,3 +124,10 @@ def get_bulk_send_job_status(
         )
 
     return BulkQueueStatusResponse(job_id=job_id, status=state)
+
+
+def get_bulk_send_job_status(
+    job_id: str,
+    workspace_id: int,
+) -> BulkQueueStatusResponse:
+    return get_scoped_job_status(job_id=job_id, workspace_id=workspace_id)
