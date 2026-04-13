@@ -2,16 +2,29 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.models.base import Base
 
 settings = get_settings()
 
+engine_kwargs: dict = {
+    "echo": settings.debug,
+    "pool_pre_ping": True,
+}
+
+if settings.database_use_null_pool:
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs["pool_size"] = settings.database_pool_size
+    engine_kwargs["max_overflow"] = settings.database_max_overflow
+    engine_kwargs["pool_timeout"] = settings.database_pool_timeout_seconds
+    engine_kwargs["pool_recycle"] = settings.database_pool_recycle_seconds
+
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
-    pool_pre_ping=True,
+    **engine_kwargs,
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -33,6 +46,28 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'template_status') THEN "
+                "    ALTER TYPE template_status ADD VALUE IF NOT EXISTS 'draft'; "
+                "  END IF; "
+                "END $$;"
+            )
+        )
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS language VARCHAR(32) NOT NULL DEFAULT 'en_US'"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS category VARCHAR(32) NOT NULL DEFAULT 'MARKETING'"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS header_type VARCHAR(16) NOT NULL DEFAULT 'none'"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS header_content TEXT"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS body_text TEXT NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS body_examples JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        await conn.execute(text("UPDATE templates SET body_text = body WHERE body_text = '' AND body IS NOT NULL"))
+        await conn.execute(text("UPDATE templates SET body = body_text WHERE body IS NULL AND body_text <> ''"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS footer_text TEXT"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS buttons JSONB NOT NULL DEFAULT '[]'::jsonb"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS meta_template_id VARCHAR(128)"))
+        await conn.execute(text("ALTER TABLE templates ADD COLUMN IF NOT EXISTS rejection_reason TEXT"))
         await conn.execute(
             text(
                 "ALTER TABLE users "

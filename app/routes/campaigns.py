@@ -23,16 +23,63 @@ from app.services.campaign_service import (
     bind_campaign_audience_snapshot,
     count_campaign_audience,
     create_campaign,
+    get_campaign_first_failure_error,
     get_campaign_progress,
     get_campaign_by_id,
     list_campaigns,
     set_campaign_status,
 )
 from app.queue.tasks import run_campaign_send_inline
+from app.services.meta_credential_service import (
+    get_workspace_meta_credentials,
+)
 from app.services.queue_service import enqueue_campaign_job, get_scoped_job_status
-from app.services.template_service import get_template_by_id
+from app.services.template_service import get_template_by_id, sync_template_status_from_meta
+
+
+async def _sync_template_for_campaign(
+    session: AsyncSession,
+    workspace: Workspace,
+    template,
+):
+    try:
+        return await sync_template_status_from_meta(
+            session=session,
+            workspace_id=workspace.id,
+            template=template,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Template is not available as approved on Meta for the current workspace credentials. "
+                f"{exc}"
+            ),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Unable to sync template status from Meta: {exc}",
+        )
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+
+
+def _derive_effective_campaign_status(
+    *,
+    campaign_status: CampaignStatus,
+    total_count: int,
+    processed_count: int,
+    failed_count: int,
+) -> CampaignStatus:
+    if total_count <= 0:
+        return campaign_status
+
+    if processed_count < total_count:
+        return campaign_status
+
+    # If all recipients are processed, derive terminal status from outcomes.
+    return CampaignStatus.failed if failed_count >= total_count else CampaignStatus.completed
 
 
 async def _build_campaign_response(
@@ -51,23 +98,37 @@ async def _build_campaign_response(
             detail="Campaign not found",
         )
 
-    audience_count = await count_campaign_audience(
+    total_count, processed_count, sent_count, failed_count, _skipped_count = await get_campaign_progress(
         session=session,
         workspace_id=workspace.id,
         campaign_id=campaign.id,
     )
+
+    effective_status = _derive_effective_campaign_status(
+        campaign_status=campaign.status,
+        total_count=total_count,
+        processed_count=processed_count,
+        failed_count=failed_count,
+    )
+    resolved_last_error = campaign.last_error
+    if failed_count > 0 and not resolved_last_error:
+        resolved_last_error = await get_campaign_first_failure_error(
+            session=session,
+            workspace_id=workspace.id,
+            campaign_id=campaign.id,
+        )
 
     return CampaignResponse(
         id=campaign.id,
         template_id=campaign.template_id,
         name=campaign.name,
         message_template=campaign.message_template,
-        status=campaign.status,
-        audience_count=audience_count,
-        success_count=campaign.success_count,
-        failed_count=campaign.failed_count,
+        status=effective_status,
+        audience_count=total_count,
+        success_count=sent_count,
+        failed_count=failed_count,
         queued_job_id=campaign.queued_job_id,
-        last_error=campaign.last_error,
+        last_error=resolved_last_error,
         created_at=campaign.created_at,
         updated_at=campaign.updated_at,
     )
@@ -89,13 +150,28 @@ async def create_campaign_route(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found",
         )
+    template = await _sync_template_for_campaign(
+        session=session,
+        workspace=workspace,
+        template=template,
+    )
+    if template.status != TemplateStatus.approved:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Campaigns can only be created from approved templates",
+        )
+    if not template.meta_template_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Template must be approved on Meta and synced before campaign launch",
+        )
 
     campaign = await create_campaign(
         session=session,
         workspace_id=workspace.id,
         template_id=payload.template_id,
         name=payload.name,
-        message_template=template.body,
+        message_template=template.body_text,
     )
     return await _build_campaign_response(
         session=session,
@@ -116,23 +192,36 @@ async def list_campaigns_route(
 
     responses: list[CampaignResponse] = []
     for campaign in campaigns:
-        audience_count = await count_campaign_audience(
+        total_count, processed_count, sent_count, failed_count, _skipped_count = await get_campaign_progress(
             session=session,
             workspace_id=workspace.id,
             campaign_id=campaign.id,
         )
+        effective_status = _derive_effective_campaign_status(
+            campaign_status=campaign.status,
+            total_count=total_count,
+            processed_count=processed_count,
+            failed_count=failed_count,
+        )
+        resolved_last_error = campaign.last_error
+        if failed_count > 0 and not resolved_last_error:
+            resolved_last_error = await get_campaign_first_failure_error(
+                session=session,
+                workspace_id=workspace.id,
+                campaign_id=campaign.id,
+            )
         responses.append(
             CampaignResponse(
                 id=campaign.id,
                 template_id=campaign.template_id,
                 name=campaign.name,
                 message_template=campaign.message_template,
-                status=campaign.status,
-                audience_count=audience_count,
-                success_count=campaign.success_count,
-                failed_count=campaign.failed_count,
+                status=effective_status,
+                audience_count=total_count,
+                success_count=sent_count,
+                failed_count=failed_count,
                 queued_job_id=campaign.queued_job_id,
-                last_error=campaign.last_error,
+                last_error=resolved_last_error,
                 created_at=campaign.created_at,
                 updated_at=campaign.updated_at,
             )
@@ -249,11 +338,25 @@ async def queue_campaign_route(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Template not found for campaign",
         )
+    template = await _sync_template_for_campaign(
+        session=session,
+        workspace=workspace,
+        template=template,
+    )
     if template.status != TemplateStatus.approved:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Campaign template must be approved before queueing",
         )
+    if not template.meta_template_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Campaign template must be approved on Meta and synced before queueing",
+        )
+
+    # Keep lightweight credentials presence check here. Callback URL host matching
+    # cannot be validated from subscribed_apps payload and is handled operationally.
+    _ = await get_workspace_meta_credentials(workspace.id)
 
     schedule_at = payload.schedule_at if payload is not None else None
 
@@ -382,9 +485,16 @@ async def campaign_progress_route(
     if total_count > 0:
         progress_percentage = round((processed_count / total_count) * 100, 2)
 
+    effective_status = _derive_effective_campaign_status(
+        campaign_status=campaign.status,
+        total_count=total_count,
+        processed_count=processed_count,
+        failed_count=failed_count,
+    )
+
     return CampaignProgressResponse(
         campaign_id=campaign.id,
-        status=campaign.status,
+        status=effective_status,
         total_count=total_count,
         processed_count=processed_count,
         sent_count=sent_count,

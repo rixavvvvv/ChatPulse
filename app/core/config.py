@@ -100,6 +100,26 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/bulk_messaging",
         alias="DATABASE_URL",
     )
+    database_pool_size: int = Field(
+        default=2,
+        alias="DATABASE_POOL_SIZE",
+    )
+    database_max_overflow: int = Field(
+        default=0,
+        alias="DATABASE_MAX_OVERFLOW",
+    )
+    database_pool_timeout_seconds: int = Field(
+        default=30,
+        alias="DATABASE_POOL_TIMEOUT_SECONDS",
+    )
+    database_pool_recycle_seconds: int = Field(
+        default=1800,
+        alias="DATABASE_POOL_RECYCLE_SECONDS",
+    )
+    database_use_null_pool: bool = Field(
+        default=False,
+        alias="DATABASE_USE_NULL_POOL",
+    )
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000"],
         alias="CORS_ORIGINS",
@@ -155,6 +175,20 @@ class Settings(BaseSettings):
         if len(value.strip()) < 16:
             raise ValueError(
                 "META_CREDENTIALS_ENCRYPTION_KEY must be at least 16 characters")
+        return value
+
+    @field_validator("database_pool_size", "database_pool_timeout_seconds", "database_pool_recycle_seconds")
+    @classmethod
+    def validate_positive_database_pool_settings(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Database pool settings must be greater than 0")
+        return value
+
+    @field_validator("database_max_overflow")
+    @classmethod
+    def validate_database_max_overflow(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("DATABASE_MAX_OVERFLOW must be 0 or greater")
         return value
 
     @field_validator("meta_graph_api_base_url")

@@ -25,6 +25,11 @@ async def send_whatsapp_message(
     workspace: Workspace = Depends(get_current_workspace),
     session: AsyncSession = Depends(get_db_session),
 ) -> SendMessageResponse:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Raw message sending is disabled for outreach. Use approved templates via campaigns.",
+    )
+
     try:
         await ensure_workspace_can_send(
             session=session,

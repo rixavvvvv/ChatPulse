@@ -17,6 +17,7 @@ from app.models.campaign_contact import (
     CampaignFailureClassification,
 )
 from app.models.message_event import MessageEventStatus
+from app.models.template import Template, TemplateStatus
 from app.queue.celery_app import celery_app
 from app.services.billing_service import BillingLimitExceeded, ensure_workspace_can_send
 from app.services.campaign_service import get_campaign_by_id, set_campaign_status
@@ -27,11 +28,11 @@ from app.services.whatsapp_service import (
     ApiError,
     InvalidNumberError,
     RateLimitError,
-    send_whatsapp_message,
+    send_whatsapp_template_message,
 )
 
 logger = logging.getLogger(__name__)
-VARIABLE_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
+NUMBER_VARIABLE_PATTERN = re.compile(r"\{\{\s*(\d+)\s*\}\}")
 settings = get_settings()
 
 
@@ -40,15 +41,17 @@ async def _dispose_engine() -> None:
 
 
 def _run_with_engine_reset(coro):
-    try:
-        return asyncio.run(coro)
-    finally:
-        # Celery runs multiple tasks in one process; disposing avoids reusing asyncpg
-        # connections tied to a closed event loop across successive asyncio.run calls.
+    async def _runner():
         try:
-            asyncio.run(_dispose_engine())
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Failed to dispose SQLAlchemy engine after task run: %s", exc)
+            return await coro
+        finally:
+            # Dispose on the same loop as task execution to avoid cleanup against a closed loop.
+            try:
+                await _dispose_engine()
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Failed to dispose SQLAlchemy engine after task run: %s", exc)
+
+    return asyncio.run(_runner())
 
 
 class WorkspaceRateLimitExceeded(Exception):
@@ -184,17 +187,33 @@ def process_bulk_send_task(
     )
 
 
-def _render_campaign_message(template: str, name: str, phone: str) -> str:
-    context = {
-        "name": name,
-        "phone": phone,
-    }
+def _extract_number_placeholders(text: str) -> list[int]:
+    numbers: list[int] = []
+    seen: set[int] = set()
+    for match in NUMBER_VARIABLE_PATTERN.finditer(text):
+        number = int(match.group(1))
+        if number in seen:
+            continue
+        seen.add(number)
+        numbers.append(number)
+    numbers.sort()
+    return numbers
 
-    def replacer(match: re.Match[str]) -> str:
-        key = match.group(1)
-        return context.get(key, match.group(0))
 
-    return VARIABLE_PATTERN.sub(replacer, template)
+def _build_template_parameters(text: str, name: str, phone: str) -> list[str]:
+    placeholders = _extract_number_placeholders(text)
+    if not placeholders:
+        return []
+
+    values: list[str] = []
+    for index in placeholders:
+        if index == 1:
+            values.append(name or "Customer")
+        elif index == 2:
+            values.append(phone)
+        else:
+            values.append(f"Value {index}")
+    return values
 
 
 async def _run_campaign_send(
@@ -230,6 +249,55 @@ async def _run_campaign_send(
             )
             audience = list(audience_result.scalars().all())
 
+            template_result = await session.execute(
+                select(Template).where(
+                    Template.workspace_id == workspace_id,
+                    Template.id == campaign.template_id,
+                )
+            )
+            template = template_result.scalar_one_or_none()
+            if not template:
+                campaign = await set_campaign_status(
+                    session=session,
+                    campaign=campaign,
+                    status=CampaignStatus.failed,
+                    success_count=0,
+                    failed_count=0,
+                    last_error="Template not found for campaign",
+                )
+                return {
+                    "success_count": campaign.success_count,
+                    "failed_count": campaign.failed_count,
+                }
+
+            if template.status != TemplateStatus.approved:
+                campaign = await set_campaign_status(
+                    session=session,
+                    campaign=campaign,
+                    status=CampaignStatus.failed,
+                    success_count=0,
+                    failed_count=0,
+                    last_error="Template must be approved before campaign send",
+                )
+                return {
+                    "success_count": campaign.success_count,
+                    "failed_count": campaign.failed_count,
+                }
+
+            if not template.meta_template_id:
+                campaign = await set_campaign_status(
+                    session=session,
+                    campaign=campaign,
+                    status=CampaignStatus.failed,
+                    success_count=0,
+                    failed_count=0,
+                    last_error="Template is not synced with Meta approval",
+                )
+                return {
+                    "success_count": campaign.success_count,
+                    "failed_count": campaign.failed_count,
+                }
+
             if not audience:
                 campaign = await set_campaign_status(
                     session=session,
@@ -249,8 +317,13 @@ async def _run_campaign_send(
             failure_reasons: list[str] = []
 
             for recipient in audience:
-                rendered_message = _render_campaign_message(
-                    template=campaign.message_template,
+                body_parameters = _build_template_parameters(
+                    text=template.body_text,
+                    name=recipient.name,
+                    phone=recipient.phone,
+                )
+                header_parameters = _build_template_parameters(
+                    text=template.header_content or "",
                     name=recipient.name,
                     phone=recipient.phone,
                 )
@@ -283,10 +356,13 @@ async def _run_campaign_send(
                             requested_count=1,
                         )
                         await _enforce_workspace_rate_limit(redis, workspace_id)
-                        send_result = await send_whatsapp_message(
+                        send_result = await send_whatsapp_template_message(
                             workspace_id=workspace_id,
                             phone=recipient.phone,
-                            message=rendered_message,
+                            template_name=template.name,
+                            language=template.language,
+                            body_parameters=body_parameters or None,
+                            header_parameters=header_parameters or None,
                         )
                         provider_message_id = send_result.get("message_id")
                         if isinstance(provider_message_id, str) and provider_message_id.strip():

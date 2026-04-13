@@ -225,3 +225,22 @@ async def get_campaign_progress(
 
     processed_count = sent_count + failed_count + skipped_count
     return total_count, processed_count, sent_count, failed_count, skipped_count
+
+
+async def get_campaign_first_failure_error(
+    session: AsyncSession,
+    *,
+    workspace_id: int,
+    campaign_id: int,
+) -> str | None:
+    stmt = (
+        select(CampaignContact.last_error)
+        .where(
+            CampaignContact.workspace_id == workspace_id,
+            CampaignContact.campaign_id == campaign_id,
+            CampaignContact.delivery_status == CampaignContactDeliveryStatus.failed,
+        )
+        .order_by(CampaignContact.id.asc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()

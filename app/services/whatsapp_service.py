@@ -69,9 +69,84 @@ class WhatsAppService:
 
         return await self._send_via_cloud_api(
             phone=normalized_phone,
-            message=message,
+            payload={
+                "messaging_product": "whatsapp",
+                "to": normalized_phone,
+                "type": "text",
+                "text": {"body": message},
+            },
             credentials=credentials,
             workspace_id=workspace_id,
+            request_kind="text",
+        )
+
+    async def send_whatsapp_template_message(
+        self,
+        workspace_id: int,
+        phone: str,
+        template_name: str,
+        language: str,
+        body_parameters: list[str] | None = None,
+        header_parameters: list[str] | None = None,
+    ) -> dict[str, str | None]:
+        if settings.whatsapp_provider != "cloud":
+            raise ApiError(
+                "WHATSAPP_PROVIDER must be set to 'cloud' for real message sending",
+                retryable=False,
+            )
+
+        normalized_phone = normalize_phone(phone)
+        if not normalized_phone:
+            raise InvalidNumberError("Invalid phone number format")
+
+        if not template_name.strip():
+            raise ApiError("Template name is required", retryable=False)
+
+        credentials = await get_workspace_meta_credentials(workspace_id)
+        if not credentials:
+            raise ApiError(
+                "Meta credentials are not configured for this workspace",
+                retryable=False,
+            )
+
+        components: list[dict[str, Any]] = []
+        if body_parameters:
+            components.append(
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": value} for value in body_parameters
+                    ],
+                }
+            )
+        if header_parameters:
+            components.append(
+                {
+                    "type": "header",
+                    "parameters": [
+                        {"type": "text", "text": value} for value in header_parameters
+                    ],
+                }
+            )
+
+        template_payload: dict[str, Any] = {
+            "name": template_name,
+            "language": {"code": language.strip() or "en_US"},
+        }
+        if components:
+            template_payload["components"] = components
+
+        return await self._send_via_cloud_api(
+            phone=normalized_phone,
+            payload={
+                "messaging_product": "whatsapp",
+                "to": normalized_phone,
+                "type": "template",
+                "template": template_payload,
+            },
+            credentials=credentials,
+            workspace_id=workspace_id,
+            request_kind="template",
         )
 
     async def send_message(
@@ -104,12 +179,14 @@ class WhatsAppService:
     async def _send_via_cloud_api(
         self,
         phone: str,
-        message: str,
+        payload: dict[str, Any],
         credentials: WorkspaceMetaCredentials,
         workspace_id: int,
+        request_kind: str,
     ) -> dict[str, str | None]:
         logger.info(
-            "Cloud send requested for workspace_id=%s phone_number_id=%s recipient=%s",
+            "Cloud %s send requested for workspace_id=%s phone_number_id=%s recipient=%s",
+            request_kind,
             workspace_id,
             credentials.phone_number_id,
             phone,
@@ -124,12 +201,6 @@ class WhatsAppService:
         headers = {
             "Authorization": f"Bearer {credentials.access_token}",
             "Content-Type": "application/json",
-        }
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": phone,
-            "type": "text",
-            "text": {"body": message},
         }
 
         try:
@@ -243,6 +314,24 @@ async def send_whatsapp_message(
         workspace_id=workspace_id,
         phone=phone,
         message=message,
+    )
+
+
+async def send_whatsapp_template_message(
+    workspace_id: int,
+    phone: str,
+    template_name: str,
+    language: str,
+    body_parameters: list[str] | None = None,
+    header_parameters: list[str] | None = None,
+) -> dict[str, str | None]:
+    return await whatsapp_service.send_whatsapp_template_message(
+        workspace_id=workspace_id,
+        phone=phone,
+        template_name=template_name,
+        language=language,
+        body_parameters=body_parameters,
+        header_parameters=header_parameters,
     )
 
 

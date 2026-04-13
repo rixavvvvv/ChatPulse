@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.campaign import Campaign, CampaignStatus
 from app.models.campaign_contact import CampaignContact, CampaignContactDeliveryStatus, CampaignFailureClassification
 from app.models.message_event import MessageEventStatus
 from app.models.message_tracking import MessageTracking, MessageTrackingStatus
@@ -24,6 +25,61 @@ class MetaWebhookProcessResult:
     processed: int = 0
     ignored: int = 0
     unknown_message: int = 0
+
+
+async def _refresh_campaign_aggregates(
+    session: AsyncSession,
+    *,
+    workspace_id: int,
+    campaign_id: int,
+) -> None:
+    campaign_stmt = select(Campaign).where(
+        Campaign.workspace_id == workspace_id,
+        Campaign.id == campaign_id,
+    )
+    campaign = (await session.execute(campaign_stmt)).scalar_one_or_none()
+    if not campaign:
+        return
+
+    total_stmt = select(func.count(CampaignContact.id)).where(
+        CampaignContact.workspace_id == workspace_id,
+        CampaignContact.campaign_id == campaign_id,
+    )
+    sent_stmt = select(func.count(CampaignContact.id)).where(
+        CampaignContact.workspace_id == workspace_id,
+        CampaignContact.campaign_id == campaign_id,
+        CampaignContact.delivery_status == CampaignContactDeliveryStatus.sent,
+    )
+    failed_stmt = select(func.count(CampaignContact.id)).where(
+        CampaignContact.workspace_id == workspace_id,
+        CampaignContact.campaign_id == campaign_id,
+        CampaignContact.delivery_status == CampaignContactDeliveryStatus.failed,
+    )
+    skipped_stmt = select(func.count(CampaignContact.id)).where(
+        CampaignContact.workspace_id == workspace_id,
+        CampaignContact.campaign_id == campaign_id,
+        CampaignContact.delivery_status == CampaignContactDeliveryStatus.skipped,
+    )
+
+    total_count = int((await session.execute(total_stmt)).scalar_one())
+    campaign.success_count = int((await session.execute(sent_stmt)).scalar_one())
+    campaign.failed_count = int((await session.execute(failed_stmt)).scalar_one())
+    skipped_count = int((await session.execute(skipped_stmt)).scalar_one())
+    processed_count = campaign.success_count + campaign.failed_count + skipped_count
+
+    if campaign.failed_count > 0:
+        first_failure_stmt = select(CampaignContact.last_error).where(
+            CampaignContact.workspace_id == workspace_id,
+            CampaignContact.campaign_id == campaign_id,
+            CampaignContact.delivery_status == CampaignContactDeliveryStatus.failed,
+        ).order_by(CampaignContact.id.asc()).limit(1)
+        first_failure = (await session.execute(first_failure_stmt)).scalar_one_or_none()
+        campaign.last_error = first_failure
+    else:
+        campaign.last_error = None
+
+    if total_count > 0 and processed_count >= total_count:
+        campaign.status = CampaignStatus.failed if campaign.failed_count >= total_count else CampaignStatus.completed
 
 
 def _parse_meta_timestamp(raw_timestamp: Any) -> datetime | None:
@@ -111,6 +167,7 @@ async def process_meta_webhook_payload(
     payload: dict[str, Any],
 ) -> MetaWebhookProcessResult:
     result = MetaWebhookProcessResult()
+    impacted_campaigns: set[tuple[int, int]] = set()
 
     entries = payload.get("entry")
     if not isinstance(entries, list):
@@ -200,6 +257,9 @@ async def process_meta_webhook_payload(
                         campaign_contact.failure_classification = CampaignFailureClassification.api_error
                         campaign_contact.last_error = tracking.last_error
 
+                if tracking.campaign_id is not None:
+                    impacted_campaigns.add((tracking.workspace_id, tracking.campaign_id))
+
                 await record_message_event(
                     session=session,
                     workspace_id=tracking.workspace_id,
@@ -210,6 +270,13 @@ async def process_meta_webhook_payload(
                 )
 
                 result.processed += 1
+
+    for workspace_id, campaign_id in impacted_campaigns:
+        await _refresh_campaign_aggregates(
+            session=session,
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+        )
 
     await session.commit()
     return result
