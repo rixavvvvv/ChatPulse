@@ -99,9 +99,11 @@ async def get_waba_subscribed_apps(
                 headers={"Authorization": f"Bearer {access_token}"},
             )
     except httpx.TimeoutException as exc:
-        raise RuntimeError("Meta API timeout while fetching subscribed apps") from exc
+        raise RuntimeError(
+            "Meta API timeout while fetching subscribed apps") from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError("Meta API transport error while fetching subscribed apps") from exc
+        raise RuntimeError(
+            "Meta API transport error while fetching subscribed apps") from exc
 
     payload: dict = {}
     try:
@@ -151,7 +153,8 @@ async def ensure_waba_app_subscription(
     except httpx.TimeoutException as exc:
         raise RuntimeError("Meta API timeout while subscribing app") from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError("Meta API transport error while subscribing app") from exc
+        raise RuntimeError(
+            "Meta API transport error while subscribing app") from exc
 
     payload: dict = {}
     try:

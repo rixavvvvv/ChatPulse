@@ -84,6 +84,10 @@ Recommended production hardening:
 
 Meta cannot call `localhost` directly. Expose your backend and use the public URL in Meta.
 
+1. If ngrok is not already authenticated on this machine, add your authtoken once:
+   ```powershell
+   ngrok config add-authtoken <YOUR_NGROK_AUTH_TOKEN>
+   ```
 1. Start API on all interfaces:
    ```powershell
    ./scripts/start_api_public.ps1 -Port 8010

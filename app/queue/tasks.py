@@ -49,7 +49,8 @@ def _run_with_engine_reset(coro):
             try:
                 await _dispose_engine()
             except Exception as exc:  # pragma: no cover
-                logger.warning("Failed to dispose SQLAlchemy engine after task run: %s", exc)
+                logger.warning(
+                    "Failed to dispose SQLAlchemy engine after task run: %s", exc)
 
     return asyncio.run(_runner())
 

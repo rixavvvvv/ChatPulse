@@ -56,7 +56,8 @@ async def _handle_meta_webhook_post(
     raw_body = await request.body()
 
     if settings.meta_app_secret:
-        signature = request.headers.get("X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
+        signature = request.headers.get(
+            "X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
         if not signature:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -144,7 +145,8 @@ async def receive_meta_webhook(
 async def verify_meta_webhook_alias(
     webhook_id: str,
     hub_mode: str | None = Query(default=None, alias="hub.mode"),
-    hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
+    hub_verify_token: str | None = Query(
+        default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
 ) -> PlainTextResponse:
     _ = webhook_id

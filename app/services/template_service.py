@@ -46,7 +46,8 @@ def _normalize_variables(body_text: str, variables: Sequence[str]) -> list[str]:
     for token in source:
         normalized = token.strip()
         if not VARIABLE_PATTERN.fullmatch(normalized):
-            raise ValueError("variables must use Meta format like {{1}}, {{2}}")
+            raise ValueError(
+                "variables must use Meta format like {{1}}, {{2}}")
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -67,7 +68,8 @@ def _validate_buttons(buttons: Sequence[TemplateButtonInput]) -> None:
             continue
 
         if not button.value.strip():
-            raise ValueError(f"button value is required for type {button.type}")
+            raise ValueError(
+                f"button value is required for type {button.type}")
 
 
 def _normalize_sample_values(
@@ -92,7 +94,8 @@ def _build_meta_components(template: Template) -> list[dict]:
 
     if template.header_type != TemplateHeaderType.none.value:
         if not template.header_content or not template.header_content.strip():
-            raise ValueError("header_content is required when header_type is not none")
+            raise ValueError(
+                "header_content is required when header_type is not none")
 
         format_value = template.header_type.upper()
         header_component: dict = {
@@ -101,14 +104,16 @@ def _build_meta_components(template: Template) -> list[dict]:
         }
         if template.header_type == TemplateHeaderType.text.value:
             header_component["text"] = template.header_content
-            header_indexes = _extract_placeholder_indexes(template.header_content)
+            header_indexes = _extract_placeholder_indexes(
+                template.header_content)
             if header_indexes:
                 header_component["example"] = {
                     "header_text": [f"Sample {index}" for index in header_indexes]
                 }
         else:
             # Meta requires media template examples; header_content should be a valid sample handle or URL.
-            header_component["example"] = {"header_handle": [template.header_content]}
+            header_component["example"] = {
+                "header_handle": [template.header_content]}
         components.append(header_component)
 
     body_component: dict = {
@@ -120,7 +125,8 @@ def _build_meta_components(template: Template) -> list[dict]:
             value for value in template.body_examples if isinstance(value, str) and value.strip()
         ]
         if len(body_examples) < len(template.variables):
-            body_examples = _normalize_sample_values(template.variables, body_examples)
+            body_examples = _normalize_sample_values(
+                template.variables, body_examples)
         body_component["example"] = {"body_text": [body_examples]}
     components.append(body_component)
 
@@ -142,11 +148,14 @@ def _build_meta_components(template: Template) -> list[dict]:
             if button_type == "quick_reply":
                 meta_buttons.append({"type": "QUICK_REPLY", "text": text})
             elif button_type == "url":
-                meta_buttons.append({"type": "URL", "text": text, "url": value})
+                meta_buttons.append(
+                    {"type": "URL", "text": text, "url": value})
             elif button_type == "phone_number":
-                meta_buttons.append({"type": "PHONE_NUMBER", "text": text, "phone_number": value})
+                meta_buttons.append(
+                    {"type": "PHONE_NUMBER", "text": text, "phone_number": value})
             elif button_type == "copy_code":
-                meta_buttons.append({"type": "COPY_CODE", "text": text, "example": [value]})
+                meta_buttons.append(
+                    {"type": "COPY_CODE", "text": text, "example": [value]})
 
         if meta_buttons:
             components.append(
@@ -189,7 +198,8 @@ async def create_template(
         raise ValueError("body_text is required")
 
     cleaned_variables = _normalize_variables(normalized_body, variables)
-    normalized_examples = _normalize_sample_values(cleaned_variables, sample_values)
+    normalized_examples = _normalize_sample_values(
+        cleaned_variables, sample_values)
     _validate_buttons(buttons)
 
     template = Template(
@@ -199,7 +209,8 @@ async def create_template(
         language=language.strip() or "en_US",
         category=category.value,
         header_type=header_type.value,
-        header_content=header_content.strip() if header_content and header_content.strip() else None,
+        header_content=header_content.strip(
+        ) if header_content and header_content.strip() else None,
         body_text=normalized_body,
         variables=cleaned_variables,
         body_examples=normalized_examples,
@@ -262,7 +273,8 @@ async def submit_template_to_meta(
 
     credentials = await get_workspace_meta_credentials(workspace_id)
     if not credentials:
-        raise ValueError("Meta credentials are not configured for this workspace")
+        raise ValueError(
+            "Meta credentials are not configured for this workspace")
 
     payload = {
         "name": template.name,
@@ -287,9 +299,11 @@ async def submit_template_to_meta(
                 json=payload,
             )
     except httpx.TimeoutException as exc:
-        raise RuntimeError("Meta API timeout while submitting template") from exc
+        raise RuntimeError(
+            "Meta API timeout while submitting template") from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError("Meta API transport error while submitting template") from exc
+        raise RuntimeError(
+            "Meta API transport error while submitting template") from exc
 
     response_payload: dict = {}
     try:
@@ -326,10 +340,12 @@ async def sync_template_status_from_meta(
 ) -> Template:
     credentials = await get_workspace_meta_credentials(workspace_id)
     if not credentials:
-        raise ValueError("Meta credentials are not configured for this workspace")
+        raise ValueError(
+            "Meta credentials are not configured for this workspace")
 
     if not template.meta_template_id and template.status == TemplateStatus.draft:
-        raise ValueError("Template is draft and has not been submitted to Meta yet")
+        raise ValueError(
+            "Template is draft and has not been submitted to Meta yet")
 
     url = (
         f"{settings.meta_graph_api_base_url}/"
@@ -349,9 +365,11 @@ async def sync_template_status_from_meta(
                 },
             )
     except httpx.TimeoutException as exc:
-        raise RuntimeError("Meta API timeout while syncing template status") from exc
+        raise RuntimeError(
+            "Meta API timeout while syncing template status") from exc
     except httpx.HTTPError as exc:
-        raise RuntimeError("Meta API transport error while syncing template status") from exc
+        raise RuntimeError(
+            "Meta API transport error while syncing template status") from exc
 
     payload: dict = {}
     try:
@@ -382,7 +400,8 @@ async def sync_template_status_from_meta(
             matched = item
 
     if not matched:
-        raise ValueError("Template not found on Meta for this business account")
+        raise ValueError(
+            "Template not found on Meta for this business account")
 
     meta_status = matched.get("status")
     template.status = _map_meta_status(meta_status)
@@ -390,7 +409,8 @@ async def sync_template_status_from_meta(
         template.meta_template_id = matched["id"]
 
     reason = matched.get("rejected_reason")
-    template.rejection_reason = reason if isinstance(reason, str) and reason.strip() else None
+    template.rejection_reason = reason if isinstance(
+        reason, str) and reason.strip() else None
 
     await session.commit()
     await session.refresh(template)

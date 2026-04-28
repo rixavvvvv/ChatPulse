@@ -44,22 +44,28 @@ class Template(Base):
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    language: Mapped[str] = mapped_column(String(32), nullable=False, default="en_US")
-    category: Mapped[str] = mapped_column(String(32), nullable=False, default=TemplateCategory.MARKETING.value)
+    language: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="en_US")
+    category: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=TemplateCategory.MARKETING.value)
     variables: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list)
-    header_type: Mapped[str] = mapped_column(String(16), nullable=False, default=TemplateHeaderType.none.value)
+    header_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=TemplateHeaderType.none.value)
     header_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     body_text: Mapped[str] = mapped_column(Text, nullable=False)
-    body_examples: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    body_examples: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list)
     footer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    buttons: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False, default=list)
+    buttons: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, nullable=False, default=list)
     status: Mapped[TemplateStatus] = mapped_column(
         SqlEnum(TemplateStatus, name="template_status"),
         nullable=False,
         default=TemplateStatus.draft,
     )
-    meta_template_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    meta_template_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

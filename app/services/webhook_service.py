@@ -258,7 +258,8 @@ async def process_meta_webhook_payload(
                         campaign_contact.last_error = tracking.last_error
 
                 if tracking.campaign_id is not None:
-                    impacted_campaigns.add((tracking.workspace_id, tracking.campaign_id))
+                    impacted_campaigns.add(
+                        (tracking.workspace_id, tracking.campaign_id))
 
                 await record_message_event(
                     session=session,
