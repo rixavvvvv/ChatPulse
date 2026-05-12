@@ -1,9 +1,20 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class BulkSendRequest(BaseModel):
-    message_template: str = Field(min_length=1, max_length=4096)
+    """For WhatsApp Cloud, use template_id with an approved Meta template (required in API route)."""
+
+    message_template: str = Field(default="", max_length=4096)
     contact_ids: list[int] = Field(min_length=1)
+    template_id: int | None = None
+
+    @model_validator(mode="after")
+    def require_message_or_template_placeholder(self):
+        if self.template_id is None and not self.message_template.strip():
+            raise ValueError(
+                "message_template cannot be empty when template_id is not provided",
+            )
+        return self
 
 
 class BulkDeliveryResult(BaseModel):

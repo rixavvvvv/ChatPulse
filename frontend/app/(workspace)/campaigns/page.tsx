@@ -80,6 +80,15 @@ type CampaignProgress = {
 };
 
 type LaunchMode = "now" | "schedule";
+type RiskLevel = "Low" | "Medium" | "High";
+type RiskIssue = {
+    section: "name" | "category" | "header" | "body" | "variables" | "buttons";
+    reason: string;
+};
+type RiskAssessment = {
+    score: RiskLevel;
+    issues: RiskIssue[];
+};
 
 const CATEGORY_OPTIONS: TemplateCategory[] = ["MARKETING", "UTILITY", "AUTHENTICATION"];
 const HEADER_OPTIONS: TemplateHeaderType[] = ["none", "text", "image", "video", "document"];
@@ -89,6 +98,110 @@ const TEMPLATE_VARIABLE_REGEX = /\{\{\d+\}\}/g;
 function extractVariables(bodyText: string): string[] {
     const matches = bodyText.match(TEMPLATE_VARIABLE_REGEX) ?? [];
     return Array.from(new Set(matches));
+}
+
+function assessTemplateRisk(input: {
+    name: string;
+    category: TemplateCategory;
+    headerType: TemplateHeaderType;
+    headerContent: string;
+    body: string;
+    variables: string[];
+    sampleValues: string[];
+    buttons: TemplateButton[];
+}): RiskAssessment {
+    const issues: RiskIssue[] = [];
+    const normalizedBody = input.body.trim();
+    const lowerBody = normalizedBody.toLowerCase();
+
+    if (!input.name.trim() || !/^[a-z0-9_]+$/.test(input.name.trim())) {
+        issues.push({
+            section: "name",
+            reason: "Template name should use lowercase letters, numbers, and underscores only.",
+        });
+    }
+
+    if (normalizedBody.length < 18) {
+        issues.push({
+            section: "body",
+            reason: "Message is too vague or short for Meta review context.",
+        });
+    }
+
+    if (input.variables.length > 0 && input.sampleValues.some((value) => !value.trim())) {
+        issues.push({
+            section: "variables",
+            reason: "Variable misuse detected: each placeholder should have a meaningful sample value.",
+        });
+    }
+
+    if (input.category === "MARKETING") {
+        const hasOfferSignal = /(offer|discount|sale|promo|deal|save|free|limited)/i.test(lowerBody);
+        if (!hasOfferSignal) {
+            issues.push({
+                section: "category",
+                reason: "Marketing category lacks offer language and may be rejected.",
+            });
+        }
+    }
+
+    if (input.headerType !== "none" && !input.headerContent.trim()) {
+        issues.push({
+            section: "header",
+            reason: "Header is enabled but content is missing.",
+        });
+    }
+
+    for (const button of input.buttons) {
+        if (!button.text.trim()) {
+            issues.push({
+                section: "buttons",
+                reason: "Button text cannot be empty.",
+            });
+            break;
+        }
+        if (button.type !== "quick_reply" && !button.value.trim()) {
+            issues.push({
+                section: "buttons",
+                reason: `Button '${button.text || button.type}' needs a valid value.`,
+            });
+            break;
+        }
+    }
+
+    let score: RiskLevel = "Low";
+    if (issues.length >= 3) {
+        score = "High";
+    } else if (issues.length > 0) {
+        score = "Medium";
+    }
+
+    return { score, issues };
+}
+
+function suggestionForRejection(reason: string | null): string {
+    const text = (reason ?? "").toLowerCase();
+    if (!text) {
+        return "Needs Fix: Add clearer context, complete variable examples, and resubmit.";
+    }
+    if (text.includes("parameter") || text.includes("invalid")) {
+        return "Needs Fix: Validate category/header/buttons fields and ensure placeholders/samples are correctly aligned.";
+    }
+    if (text.includes("quality") || text.includes("vague")) {
+        return "Needs Fix: Make body text specific and explicit about purpose/value.";
+    }
+    if (text.includes("marketing") || text.includes("promotional")) {
+        return "Needs Fix: Add offer details (benefit, CTA, or promotion terms) for marketing templates.";
+    }
+    return "Needs Fix: Update template wording/fields per rejection reason and submit again.";
+}
+
+function normalizeSubmitErrorMessage(message: string): string {
+    const lower = message.toLowerCase();
+    if (lower.includes("invalid parameter")) {
+        return `${message}. Needs Fix: use a lowercase template name with underscores, valid category, and complete header/body/button fields.`;
+    }
+    return message;
 }
 
 export default function CampaignBuilderPage() {
@@ -113,6 +226,7 @@ export default function CampaignBuilderPage() {
     const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [progress, setProgress] = useState<CampaignProgress | null>(null);
+    const [pendingTemplateIds, setPendingTemplateIds] = useState<number[]>([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
@@ -139,6 +253,30 @@ export default function CampaignBuilderPage() {
         [templates],
     );
     const rejectedTemplates = useMemo(() => templates.filter((template) => template.status === "rejected"), [templates]);
+    const draftRiskAssessment = useMemo(
+        () =>
+            assessTemplateRisk({
+                name: newTemplateName,
+                category: newTemplateCategory,
+                headerType: newTemplateHeaderType,
+                headerContent: newTemplateHeaderContent,
+                body: newTemplateBody,
+                variables: previewVariables,
+                sampleValues: newTemplateSamples,
+                buttons: newTemplateButtons,
+            }),
+        [
+            newTemplateBody,
+            newTemplateButtons,
+            newTemplateCategory,
+            newTemplateHeaderContent,
+            newTemplateHeaderType,
+            newTemplateName,
+            newTemplateSamples,
+            previewVariables,
+        ],
+    );
+    const highlightedSections = useMemo(() => new Set(draftRiskAssessment.issues.map((issue) => issue.section)), [draftRiskAssessment]);
 
     const loadData = useCallback(async () => {
         const session = getSession();
@@ -321,9 +459,21 @@ export default function CampaignBuilderPage() {
             return;
         }
 
+        if (pendingTemplateIds.includes(nextTemplateId)) {
+            return;
+        }
+
         setBusy(true);
         setError(null);
         setSuccess(null);
+        setPendingTemplateIds((previous) => [...previous, nextTemplateId]);
+        setTemplates((previous) =>
+            previous.map((template) =>
+                template.id === nextTemplateId
+                    ? { ...template, status: "pending", rejection_reason: null }
+                    : template,
+            ),
+        );
         try {
             await apiRequest<{ id: number; status: string; meta_template_id: string | null }>(
                 `/templates/${nextTemplateId}/submit`,
@@ -335,8 +485,11 @@ export default function CampaignBuilderPage() {
             setSuccess("Template submitted to Meta and moved to pending status.");
             await loadData();
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Unable to submit template to Meta");
+            const message = err instanceof Error ? err.message : "Unable to submit template to Meta";
+            setError(normalizeSubmitErrorMessage(message));
+            await loadData();
         } finally {
+            setPendingTemplateIds((previous) => previous.filter((id) => id !== nextTemplateId));
             setBusy(false);
         }
     }
@@ -513,12 +666,20 @@ export default function CampaignBuilderPage() {
                     <CardContent>
                         <form className="space-y-4" onSubmit={handleCreateTemplate}>
                             <div className="grid gap-3 md:grid-cols-3">
-                                <Input value={newTemplateName} onChange={(event) => setNewTemplateName(event.target.value)} placeholder="template_name" required />
+                                <Input
+                                    value={newTemplateName}
+                                    onChange={(event) => setNewTemplateName(event.target.value)}
+                                    placeholder="template_name"
+                                    className={highlightedSections.has("name") ? "border-rose-300 focus-visible:ring-rose-400" : ""}
+                                    required
+                                />
                                 <Input value={newTemplateLanguage} onChange={(event) => setNewTemplateLanguage(event.target.value)} placeholder="en_US" required />
                                 <select
                                     value={newTemplateCategory}
                                     onChange={(event) => setNewTemplateCategory(event.target.value as TemplateCategory)}
-                                    className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
+                                    className={`h-10 w-full rounded-xl border bg-background px-3 text-sm ${
+                                        highlightedSections.has("category") ? "border-rose-300" : "border-input"
+                                    }`}
                                 >
                                     {CATEGORY_OPTIONS.map((category) => (
                                         <option key={category} value={category}>{category}</option>
@@ -530,7 +691,9 @@ export default function CampaignBuilderPage() {
                                 <select
                                     value={newTemplateHeaderType}
                                     onChange={(event) => setNewTemplateHeaderType(event.target.value as TemplateHeaderType)}
-                                    className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
+                                    className={`h-10 w-full rounded-xl border bg-background px-3 text-sm ${
+                                        highlightedSections.has("header") ? "border-rose-300" : "border-input"
+                                    }`}
                                 >
                                     {HEADER_OPTIONS.map((headerType) => (
                                         <option key={headerType} value={headerType}>Header: {headerType}</option>
@@ -541,6 +704,7 @@ export default function CampaignBuilderPage() {
                                         value={newTemplateHeaderContent}
                                         onChange={(event) => setNewTemplateHeaderContent(event.target.value)}
                                         placeholder={newTemplateHeaderType === "text" ? "Header text" : "Media sample handle or URL"}
+                                        className={highlightedSections.has("header") ? "border-rose-300 focus-visible:ring-rose-400" : ""}
                                         required
                                     />
                                 ) : (
@@ -558,7 +722,9 @@ export default function CampaignBuilderPage() {
                                 <textarea
                                     value={newTemplateBody}
                                     onChange={(event) => setNewTemplateBody(event.target.value)}
-                                    className="min-h-28 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                                    className={`min-h-28 w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 ${
+                                        highlightedSections.has("body") ? "border-rose-300 focus-visible:ring-rose-400" : "border-input focus-visible:ring-ring"
+                                    }`}
                                     required
                                 />
                                 <p className="text-xs text-slate-600">Detected variables: {previewVariables.join(", ") || "none"}</p>
@@ -573,6 +739,7 @@ export default function CampaignBuilderPage() {
                                             value={newTemplateSamples[index] ?? ""}
                                             onChange={(event) => updateSampleValue(index, event.target.value)}
                                             placeholder={`Example for ${variable}`}
+                                            className={highlightedSections.has("variables") ? "border-rose-300 focus-visible:ring-rose-400" : ""}
                                             required
                                         />
                                     ))}
@@ -585,7 +752,11 @@ export default function CampaignBuilderPage() {
                                 placeholder="Footer (optional)"
                             />
 
-                            <div className="space-y-2 rounded-2xl border border-border/70 p-3">
+                            <div
+                                className={`space-y-2 rounded-2xl border p-3 ${
+                                    highlightedSections.has("buttons") ? "border-rose-300" : "border-border/70"
+                                }`}
+                            >
                                 <div className="flex items-center justify-between">
                                     <p className="text-sm font-medium text-slate-700">Buttons (max 3)</p>
                                     <Button type="button" size="sm" variant="outline" onClick={addButton} disabled={newTemplateButtons.length >= 3}>
@@ -626,6 +797,20 @@ export default function CampaignBuilderPage() {
                             </div>
 
                             <Button type="submit" disabled={busy}>Save Draft Template</Button>
+
+                            <div className="rounded-2xl border border-border/70 bg-slate-50 p-3 text-sm">
+                                <p className="font-semibold text-slate-900">Pre-Submission Risk Engine</p>
+                                <p className="mt-1 text-slate-700">Risk Score: {draftRiskAssessment.score}</p>
+                                {draftRiskAssessment.issues.length === 0 ? (
+                                    <p className="mt-1 text-emerald-700">No obvious rejection signals detected.</p>
+                                ) : (
+                                    <ul className="mt-2 list-disc space-y-1 pl-5 text-rose-700">
+                                        {draftRiskAssessment.issues.map((issue, idx) => (
+                                            <li key={`${issue.section}-${idx}`}>{issue.reason}</li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
                         </form>
                     </CardContent>
                 </Card>
@@ -896,16 +1081,16 @@ export default function CampaignBuilderPage() {
                                             <TableCell className="font-medium text-slate-900">{template.name}</TableCell>
                                             <TableCell className="capitalize text-slate-700">{template.status}</TableCell>
                                             <TableCell className="space-x-2">
-                                                {template.status === "draft" ? (
+                                                {template.status === "draft" || pendingTemplateIds.includes(template.id) ? (
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        disabled={busy}
+                                                        disabled={busy || pendingTemplateIds.includes(template.id)}
                                                         onClick={() => {
                                                             void handleSubmitTemplate(template.id);
                                                         }}
                                                     >
-                                                        Submit to Meta
+                                                        {pendingTemplateIds.includes(template.id) ? "Waiting for approval" : "Submit to Meta"}
                                                     </Button>
                                                 ) : null}
                                                 {template.status === "pending" || (template.status === "approved" && !template.meta_template_id) ? (
@@ -990,7 +1175,10 @@ export default function CampaignBuilderPage() {
                                 rejectedTemplates.map((template) => (
                                     <TableRow key={template.id}>
                                         <TableCell className="font-medium text-slate-900">{template.name}</TableCell>
-                                        <TableCell className="text-slate-700">{template.rejection_reason ?? "No rejection reason returned"}</TableCell>
+                                        <TableCell className="space-y-1 text-slate-700">
+                                            <p>{template.rejection_reason ?? "No rejection reason returned"}</p>
+                                            <p className="text-xs text-amber-700">{suggestionForRejection(template.rejection_reason)}</p>
+                                        </TableCell>
                                         <TableCell>
                                             <Button
                                                 size="sm"

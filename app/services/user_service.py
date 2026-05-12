@@ -1,11 +1,16 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, UserRole
 
 
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
-    stmt = select(User).where(User.email == email)
+    normalized = normalize_email(email)
+    stmt = select(User).where(func.lower(User.email) == normalized)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -29,7 +34,7 @@ async def create_user(
     is_active: bool = True,
 ) -> User:
     user = User(
-        email=email,
+        email=normalize_email(email),
         password_hash=password_hash,
         role=role.value,
         subscription_plan=subscription_plan,

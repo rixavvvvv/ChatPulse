@@ -17,20 +17,22 @@ app/
 
 ## Quick Start
 
-1. Create and activate a virtual environment.
+1. Create and activate a virtual environment (`python -m venv .venv`).
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Copy `.env.example` to `.env` and update values as needed.
-4. Run the API:
+3. Copy `.env.example` to `.env` and update values as needed (PostgreSQL on `DATABASE_URL`, Redis on `REDIS_URL` when using queues).
+4. Start Postgres and Redis, then run the API (default port **8000**):
    ```bash
    uvicorn app.main:app --reload
    ```
+5. In another terminal, start the frontend from `frontend/` (default Next.js port **3000**):
+   ```bash
+   cd frontend && npm install && npm run dev
+   ```
 
-Run backend : uvicorn app.main:app --reload
-docke
-Frontend: npm run dev
+The frontend calls the API URL from `NEXT_PUBLIC_API_URL` (see `frontend/.env.example`). It defaults to `http://127.0.0.1:8000`, matching the uvicorn command above. If you use `./scripts/start_api_public.ps1` (port **8010**), set `NEXT_PUBLIC_API_URL=http://127.0.0.1:8010` in `frontend/.env.local`.
 
 ## Health Check
 
@@ -43,9 +45,9 @@ Frontend: npm run dev
    ```bash
    uvicorn app.main:app --reload
    ```
-3. Start Celery worker:
+3. Start Celery worker (from repo root with the same `.venv`):
    ```bash
-   celery -A app.worker.celery_app worker --loglevel=info
+   celery -A app.worker:celery_app worker --loglevel=info
    ```
 
 ### Bulk Send Endpoints
@@ -88,20 +90,20 @@ Meta cannot call `localhost` directly. Expose your backend and use the public UR
    ```powershell
    ngrok config add-authtoken <YOUR_NGROK_AUTH_TOKEN>
    ```
-1. Start API on all interfaces:
+2. Start API on all interfaces (requires `.venv`; default port **8010**):
    ```powershell
    ./scripts/start_api_public.ps1 -Port 8010
    ```
-2. Start ngrok tunnel (if installed):
+3. Start ngrok tunnel (if installed) to the **same port**:
    ```powershell
    ./scripts/start_ngrok_tunnel.ps1 -Port 8010
    ```
-3. Set `PUBLIC_BASE_URL` in `.env` to your tunnel URL and restart API.
-4. Validate your webhook setup config:
+4. Set `PUBLIC_BASE_URL` in `.env` to your tunnel URL (`https://....ngrok-free.app`) and restart the API. Point the frontend at the local API with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8010` in `frontend/.env.local` (your browser uses localhost; Meta uses the tunnel).
+5. Validate your webhook setup config:
    - `GET /webhook/meta/config`
-5. Configure Meta webhook callback URL to:
+6. Configure Meta webhook callback URL to:
    - `{PUBLIC_BASE_URL}/webhook/meta`
-6. Subscribe Meta app webhook field:
+7. Subscribe Meta app webhook field:
    - `messages`
 
 ## Message Events + Analytics

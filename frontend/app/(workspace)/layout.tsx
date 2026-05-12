@@ -63,6 +63,12 @@ export default function WorkspaceLayout({
                         <Link href="/bulk-messaging" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                             Bulk
                         </Link>
+                        <Link
+                            href="/integrations/shopify"
+                            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                            Shopify
+                        </Link>
                         <span className="rounded-lg border border-border p-2 text-slate-600">
                             <Menu className="h-4 w-4" />
                         </span>

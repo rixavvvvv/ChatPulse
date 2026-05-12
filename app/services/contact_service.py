@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contact import Contact
 from app.schemas.contact import ContactUploadResponse
+from app.services.tag_service import set_contact_tags
 
 PHONE_PATTERN = re.compile(r"^\+?[1-9]\d{7,14}$")
 
@@ -26,6 +27,34 @@ def normalize_phone(phone: str) -> str | None:
         return None
 
     return normalized
+
+
+def digits_for_whatsapp_cloud_api(
+    normalized: str,
+    default_calling_code: str | None = None,
+) -> str | None:
+    """Build the Meta Cloud API `to` value: digits only, no plus sign.
+
+    Meta compares development allowlists against this form; a leading ``+`` in JSON
+    can fail matching. If ``default_calling_code`` is set (e.g. ``91`` for India),
+    10-digit national mobiles are prefixed so ``9682852240`` becomes ``919682852240``.
+    """
+    raw = normalized.strip()
+    if not raw:
+        return None
+    digits_only = "".join(ch for ch in raw if ch.isdigit())
+    if not digits_only:
+        return None
+
+    cc = (default_calling_code or "").strip().lstrip("+")
+    if cc == "91" and len(digits_only) == 11 and digits_only.startswith("0"):
+        digits_only = digits_only[1:]
+    if cc and len(digits_only) == 10:
+        digits_only = f"{cc}{digits_only}"
+
+    if len(digits_only) < 8 or len(digits_only) > 15:
+        return None
+    return digits_only
 
 
 def _get_column_name(fieldnames: list[str] | None, target: str) -> str | None:
@@ -151,6 +180,16 @@ async def create_contact(
     except IntegrityError as exc:
         await session.rollback()
         raise ValueError("Contact with this phone already exists in the workspace") from exc
+
+    if normalized_tags:
+        # Keep the new normalized tags tables in sync without breaking existing UI response shape.
+        await set_contact_tags(
+            session,
+            workspace_id=workspace_id,
+            contact_id=contact.id,
+            tag_names=normalized_tags,
+        )
+        await session.refresh(contact)
 
     return contact
 

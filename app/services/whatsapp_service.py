@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
-from app.services.contact_service import normalize_phone
+from app.services.contact_service import digits_for_whatsapp_cloud_api, normalize_phone
 from app.services.meta_credential_service import (
     WorkspaceMetaCredentials,
     get_workspace_meta_credentials,
@@ -57,6 +57,13 @@ class WhatsAppService:
         if not normalized_phone:
             raise InvalidNumberError("Invalid phone number format")
 
+        api_to = digits_for_whatsapp_cloud_api(
+            normalized_phone,
+            settings.whatsapp_default_calling_code,
+        )
+        if not api_to:
+            raise InvalidNumberError("Invalid phone number format for WhatsApp API")
+
         if not message.strip():
             raise ApiError("Message cannot be empty", retryable=False)
 
@@ -68,10 +75,10 @@ class WhatsAppService:
             )
 
         return await self._send_via_cloud_api(
-            phone=normalized_phone,
+            phone=api_to,
             payload={
                 "messaging_product": "whatsapp",
-                "to": normalized_phone,
+                "to": api_to,
                 "type": "text",
                 "text": {"body": message},
             },
@@ -98,6 +105,13 @@ class WhatsAppService:
         normalized_phone = normalize_phone(phone)
         if not normalized_phone:
             raise InvalidNumberError("Invalid phone number format")
+
+        api_to = digits_for_whatsapp_cloud_api(
+            normalized_phone,
+            settings.whatsapp_default_calling_code,
+        )
+        if not api_to:
+            raise InvalidNumberError("Invalid phone number format for WhatsApp API")
 
         if not template_name.strip():
             raise ApiError("Template name is required", retryable=False)
@@ -137,10 +151,10 @@ class WhatsAppService:
             template_payload["components"] = components
 
         return await self._send_via_cloud_api(
-            phone=normalized_phone,
+            phone=api_to,
             payload={
                 "messaging_product": "whatsapp",
-                "to": normalized_phone,
+                "to": api_to,
                 "type": "template",
                 "template": template_payload,
             },

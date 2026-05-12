@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db_session
 from app.dependencies.auth import require_super_admin
+from app.models.queue_dead_letter import QueueDeadLetter
 from app.models.user import User
 from app.schemas.admin import (
     AdminCreateUserRequest,
@@ -16,8 +18,14 @@ from app.schemas.admin import (
     AdminWorkspaceResponse,
     AdminWorkspaceUsageResponse,
 )
+from app.schemas.webhooks_admin import (
+    WebhookIngestionReplayRequest,
+    WebhookIngestionReplayResponse,
+    WebhookIngestionReplayItemResponse,
+)
 from app.services.admin_service import list_all_workspaces, list_workspace_usage_messages_sent
 from app.services.auth_service import hash_password
+from app.services.queue_monitoring_service import celery_inspect_snapshot
 from app.services.subscription_service import (
     create_plan,
     get_plan_by_id,
@@ -26,6 +34,7 @@ from app.services.subscription_service import (
     list_plans,
     upsert_user_subscription,
 )
+from app.services.webhook_ingestion_service import replay_webhook_ingestions
 from app.services.user_service import (
     create_user,
     get_user_by_email,
@@ -282,3 +291,66 @@ async def monitor_messages_sent_as_super_admin(
         )
         for workspace, usage in usage_rows
     ]
+
+
+@router.get("/queues/inspect")
+async def inspect_celery_queues(
+    _super_admin: User = Depends(require_super_admin),
+) -> dict:
+    """Live worker snapshot (requires at least one reachable Celery worker)."""
+    return celery_inspect_snapshot()
+
+
+@router.get("/queues/dead-letters")
+async def list_queue_dead_letters(
+    session: AsyncSession = Depends(get_db_session),
+    _super_admin: User = Depends(require_super_admin),
+    limit: int = 50,
+) -> list[dict]:
+    cap = max(1, min(limit, 200))
+    stmt = (
+        select(QueueDeadLetter)
+        .order_by(desc(QueueDeadLetter.id))
+        .limit(cap)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "task_name": r.task_name,
+            "celery_task_id": r.celery_task_id,
+            "exception_type": r.exception_type,
+            "exception_message": r.exception_message,
+            "retries_at_failure": r.retries_at_failure,
+            "max_retries": r.max_retries,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "replayed_at": r.replayed_at.isoformat() if r.replayed_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post(
+    "/queues/webhook-ingestions/replay",
+    response_model=WebhookIngestionReplayResponse,
+)
+async def replay_webhook_ingestions_admin(
+    payload: WebhookIngestionReplayRequest,
+    session: AsyncSession = Depends(get_db_session),
+    _super_admin: User = Depends(require_super_admin),
+) -> WebhookIngestionReplayResponse:
+    raw = await replay_webhook_ingestions(
+        session, ingestion_ids=payload.ingestion_ids
+    )
+    items: list[WebhookIngestionReplayItemResponse] = []
+    for row in raw:
+        items.append(
+            WebhookIngestionReplayItemResponse(
+                ingestion_id=int(row["ingestion_id"]),
+                status=row.get("status"),
+                celery_task_id=row.get("celery_task_id"),
+                replay_count=row.get("replay_count"),
+                error=row.get("error"),
+            )
+        )
+    return WebhookIngestionReplayResponse(results=items)

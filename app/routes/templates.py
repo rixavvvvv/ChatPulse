@@ -16,6 +16,7 @@ from app.services.template_service import (
     get_template_by_id,
     list_templates,
     submit_template_to_meta,
+    sync_all_templates_from_meta,
     sync_template_status_from_meta,
     update_template_status,
 )
@@ -217,3 +218,17 @@ async def sync_template_status_route(
         )
 
     return _to_template_response(template)
+
+
+@router.post("/sync-all")
+async def sync_all_templates_route(
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(require_workspace_admin),
+) -> dict[str, int]:
+    try:
+        result = await sync_all_templates_from_meta(session=session, workspace_id=workspace.id)
+        return {"created": int(result.get("created", 0)), "updated": int(result.get("updated", 0))}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))

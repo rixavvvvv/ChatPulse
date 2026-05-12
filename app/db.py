@@ -125,3 +125,13 @@ async def init_db() -> None:
                 "WHERE us.user_id IS NULL"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE webhook_ingestions ADD COLUMN IF NOT EXISTS raw_body BYTEA"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE webhook_ingestions ADD COLUMN IF NOT EXISTS provider_signature TEXT"
+            )
+        )

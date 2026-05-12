@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,7 @@ export default function LoginPage() {
                 <CardHeader className="space-y-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Welcome Back</p>
                     <CardTitle className="font-[var(--font-space-grotesk)] text-3xl">Log In</CardTitle>
-                    <CardDescription>Use your API credentials to enter the operational workspace.</CardDescription>
+                    <CardDescription>Use the email and password from your workspace account.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form className="space-y-4" onSubmit={handleSubmit}>
@@ -95,6 +96,13 @@ export default function LoginPage() {
                     </form>
 
                     {error ? <p className="mt-4 text-sm text-rose-700">{error}</p> : null}
+
+                    <p className="mt-6 text-center text-sm text-slate-600">
+                        No account yet?{" "}
+                        <Link href="/signup" className="font-medium text-sky-700 hover:underline">
+                            Sign up
+                        </Link>
+                    </p>
                 </CardContent>
             </Card>
         </main>

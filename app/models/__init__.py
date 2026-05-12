@@ -6,6 +6,31 @@ from app.models.campaign_contact import (
     CampaignFailureClassification,
 )
 from app.models.contact import Contact
+from app.models.contact_intelligence import (
+    AttributeDefinition,
+    ContactActivity,
+    ContactAttributeValue,
+    ContactImportJob,
+    ContactImportRow,
+    ContactNote,
+    ContactTag,
+    Segment,
+    SegmentMembership,
+    Tag,
+)
+from app.models.domain_event import DomainEvent
+from app.models.queue_dead_letter import QueueDeadLetter
+from app.models.webhook_ingestion import (
+    WebhookIngestion,
+    WebhookIngestionStatus,
+    WebhookSource,
+)
+from app.models.ecommerce import (
+    EcommerceEventTemplateMap,
+    EcommerceStoreConnection,
+    OrderWebhookDeliveryLog,
+    OrderWebhookLogStatus,
+)
 from app.models.message_event import MessageEvent, MessageEventStatus
 from app.models.message_tracking import MessageTracking, MessageTrackingStatus
 from app.models.meta_credential import MetaCredential
@@ -21,6 +46,25 @@ __all__ = [
     "Base",
     "User",
     "Contact",
+    "Tag",
+    "ContactTag",
+    "AttributeDefinition",
+    "ContactAttributeValue",
+    "ContactNote",
+    "ContactActivity",
+    "ContactImportJob",
+    "ContactImportRow",
+    "Segment",
+    "SegmentMembership",
+    "DomainEvent",
+    "QueueDeadLetter",
+    "WebhookIngestion",
+    "WebhookIngestionStatus",
+    "WebhookSource",
+    "EcommerceStoreConnection",
+    "EcommerceEventTemplateMap",
+    "OrderWebhookDeliveryLog",
+    "OrderWebhookLogStatus",
     "MessageEvent",
     "MessageEventStatus",
     "MessageTracking",

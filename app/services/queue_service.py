@@ -29,12 +29,14 @@ def enqueue_bulk_send_job(
     workspace_id: int,
     message_template: str,
     contact_ids: list[int],
+    template_id: int | None = None,
 ) -> BulkQueueEnqueueResponse:
     try:
         task = process_bulk_send_task.delay(
             workspace_id=workspace_id,
             message_template=message_template,
             contact_ids=contact_ids,
+            template_id=template_id,
         )
     except OperationalError as exc:
         raise RuntimeError("Queue broker is unavailable") from exc

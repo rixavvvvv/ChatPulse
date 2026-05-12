@@ -1,5 +1,6 @@
 import re
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
 from sqlalchemy import select
@@ -19,6 +20,7 @@ settings = get_settings()
 
 VARIABLE_PATTERN = re.compile(r"\{\{\d+\}\}")
 SUPPORTED_BUTTON_TYPES = {"quick_reply", "url", "phone_number", "copy_code"}
+META_TEMPLATE_NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,512}$")
 
 
 def _extract_placeholder_indexes(text: str) -> list[int]:
@@ -87,6 +89,17 @@ def _normalize_sample_values(
         normalized.append(f"Sample {len(normalized) + 1}")
 
     return normalized[: len(placeholders)]
+
+
+def _validate_template_name(name: str) -> str:
+    normalized = name.strip().lower()
+    if not normalized:
+        raise ValueError("template name is required")
+    if not META_TEMPLATE_NAME_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            "template name must use lowercase letters, numbers, and underscores only",
+        )
+    return normalized
 
 
 def _build_meta_components(template: Template) -> list[dict]:
@@ -193,6 +206,7 @@ async def create_template(
     footer_text: str | None,
     buttons: list[TemplateButtonInput],
 ) -> Template:
+    normalized_name = _validate_template_name(name)
     normalized_body = body_text.strip()
     if not normalized_body:
         raise ValueError("body_text is required")
@@ -204,7 +218,7 @@ async def create_template(
 
     template = Template(
         workspace_id=workspace_id,
-        name=name.strip(),
+        name=normalized_name,
         body=normalized_body,
         language=language.strip() or "en_US",
         category=category.value,
@@ -276,8 +290,13 @@ async def submit_template_to_meta(
         raise ValueError(
             "Meta credentials are not configured for this workspace")
 
+    normalized_name = _validate_template_name(template.name)
+
+    if template.name != normalized_name:
+        template.name = normalized_name
+
     payload = {
-        "name": template.name,
+        "name": normalized_name,
         "language": template.language,
         "category": template.category,
         "components": _build_meta_components(template),
@@ -318,8 +337,26 @@ async def submit_template_to_meta(
         error_block = response_payload.get("error")
         if isinstance(error_block, dict):
             message = error_block.get("message")
+            user_message = error_block.get("error_user_msg")
+            code = error_block.get("code")
+            subcode = error_block.get("error_subcode")
+
+            pieces: list[str] = []
             if isinstance(message, str) and message.strip():
-                detail = message
+                pieces.append(message.strip())
+            if isinstance(user_message, str) and user_message.strip():
+                pieces.append(user_message.strip())
+
+            if pieces:
+                detail = " - ".join(pieces)
+
+            code_bits: list[str] = []
+            if code is not None:
+                code_bits.append(f"code={code}")
+            if subcode is not None:
+                code_bits.append(f"subcode={subcode}")
+            if code_bits:
+                detail = f"{detail} ({', '.join(code_bits)})"
         raise ValueError(detail)
 
     meta_template_id = response_payload.get("id")
@@ -415,3 +452,162 @@ async def sync_template_status_from_meta(
     await session.commit()
     await session.refresh(template)
     return template
+
+
+def _extract_component_text(components: Any, component_type: str) -> str | None:
+    if not isinstance(components, list):
+        return None
+    for c in components:
+        if not isinstance(c, dict):
+            continue
+        if str(c.get("type", "")).upper() != component_type.upper():
+            continue
+        text = c.get("text")
+        if isinstance(text, str) and text.strip():
+            return text
+    return None
+
+
+def _extract_header(components: Any) -> tuple[str, str | None] | None:
+    if not isinstance(components, list):
+        return None
+    for c in components:
+        if not isinstance(c, dict):
+            continue
+        if str(c.get("type", "")).upper() != "HEADER":
+            continue
+        fmt = str(c.get("format", "")).strip().lower()
+        if not fmt:
+            continue
+        if fmt == "text":
+            text = c.get("text")
+            return (TemplateHeaderType.text.value, text if isinstance(text, str) else None)
+        if fmt in {"image", "video", "document"}:
+            # Meta list responses don't always include example handles; keep content empty.
+            return (fmt, None)
+    return None
+
+
+async def sync_all_templates_from_meta(
+    session: AsyncSession,
+    *,
+    workspace_id: int,
+    limit: int = 250,
+) -> dict[str, int]:
+    credentials = await get_workspace_meta_credentials(workspace_id)
+    if not credentials:
+        raise ValueError("Meta credentials are not configured for this workspace")
+
+    url = (
+        f"{settings.meta_graph_api_base_url}/"
+        f"{settings.meta_graph_api_version}/"
+        f"{credentials.business_account_id}/message_templates"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.meta_api_timeout_seconds) as client:
+            response = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {credentials.access_token}"},
+                params={
+                    "fields": "id,name,status,language,category,rejected_reason,components",
+                    "limit": max(1, min(limit, 500)),
+                },
+            )
+    except httpx.TimeoutException as exc:
+        raise RuntimeError("Meta API timeout while syncing templates") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError("Meta API transport error while syncing templates") from exc
+
+    payload: dict = {}
+    try:
+        parsed = response.json()
+        if isinstance(parsed, dict):
+            payload = parsed
+    except ValueError:
+        payload = {}
+
+    if response.status_code >= 400:
+        detail = "Meta template sync failed"
+        error_block = payload.get("error")
+        if isinstance(error_block, dict):
+            message = error_block.get("message")
+            if isinstance(message, str) and message.strip():
+                detail = message
+        raise ValueError(detail)
+
+    data = payload.get("data") if isinstance(payload.get("data"), list) else []
+    created = 0
+    updated = 0
+
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        meta_id = item.get("id")
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        meta_id_str = meta_id.strip() if isinstance(meta_id, str) else None
+
+        stmt = select(Template).where(
+            Template.workspace_id == workspace_id,
+            Template.meta_template_id == meta_id_str,
+        ) if meta_id_str else select(Template).where(
+            Template.workspace_id == workspace_id,
+            Template.name == name,
+        )
+        existing = (await session.execute(stmt)).scalar_one_or_none()
+
+        meta_status = item.get("status")
+        category = item.get("category")
+        language = item.get("language")
+        rejection_reason = item.get("rejected_reason")
+        components = item.get("components")
+
+        body_text = _extract_component_text(components, "BODY") or ""
+        footer_text = _extract_component_text(components, "FOOTER")
+        header = _extract_header(components)
+
+        if existing:
+            existing.name = _validate_template_name(existing.name)
+            if isinstance(language, str) and language.strip():
+                existing.language = language.strip()
+            if isinstance(category, str) and category.strip():
+                existing.category = category.strip()
+            existing.status = _map_meta_status(meta_status)
+            existing.rejection_reason = (
+                rejection_reason if isinstance(rejection_reason, str) and rejection_reason.strip() else None
+            )
+            if meta_id_str:
+                existing.meta_template_id = meta_id_str
+            if body_text:
+                existing.body_text = body_text
+                existing.body = body_text
+            existing.footer_text = footer_text if footer_text and footer_text.strip() else None
+            if header:
+                existing.header_type = header[0]
+                existing.header_content = header[1]
+            updated += 1
+        else:
+            template = Template(
+                workspace_id=workspace_id,
+                name=_validate_template_name(name),
+                body=body_text or name,
+                body_text=body_text or name,
+                language=(language.strip() if isinstance(language, str) and language.strip() else "en_US"),
+                category=(category.strip() if isinstance(category, str) and category.strip() else TemplateCategory.MARKETING.value),
+                variables=_normalize_variables(body_text or "", []),
+                body_examples=[],
+                header_type=(header[0] if header else TemplateHeaderType.none.value),
+                header_content=(header[1] if header else None),
+                footer_text=(footer_text if footer_text and footer_text.strip() else None),
+                buttons=[],
+                status=_map_meta_status(meta_status),
+                meta_template_id=meta_id_str,
+                rejection_reason=(rejection_reason if isinstance(rejection_reason, str) and rejection_reason.strip() else None),
+            )
+            session.add(template)
+            created += 1
+
+    await session.commit()
+    return {"created": created, "updated": updated}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +25,9 @@ class MetaWebhookProcessResult:
     processed: int = 0
     ignored: int = 0
     unknown_message: int = 0
+    domain_events: list[tuple[str, int | None, dict[str, Any], str | None]] = field(
+        default_factory=list
+    )
 
 
 async def _refresh_campaign_aggregates(
@@ -268,6 +271,20 @@ async def process_meta_webhook_payload(
                     contact_id=contact_id,
                     status=event_status,
                     event_timestamp=tracking.last_webhook_at,
+                )
+
+                result.domain_events.append(
+                    (
+                        "whatsapp.message_status",
+                        tracking.workspace_id,
+                        {
+                            "provider_message_id": provider_message_id,
+                            "status": normalized_status,
+                            "recipient_id": status_payload.get("recipient_id"),
+                            "errors": status_payload.get("errors"),
+                        },
+                        f"wamid:{provider_message_id}:{normalized_status}",
+                    )
                 )
 
                 result.processed += 1

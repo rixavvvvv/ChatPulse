@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ContactRound, LayoutDashboard, Megaphone, Rocket, Workflow } from "lucide-react";
+import { ContactRound, LayoutDashboard, Megaphone, Rocket, ShoppingBag, Workflow } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,11 @@ const navItems = [
         href: "/bulk-messaging",
         label: "Bulk Messaging",
         icon: Megaphone,
+    },
+    {
+        href: "/integrations/shopify",
+        label: "Shopify",
+        icon: ShoppingBag,
     },
 ];
 

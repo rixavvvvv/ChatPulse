@@ -18,6 +18,17 @@ type Contact = {
     created_at: string;
 };
 
+type TemplateStatus = "draft" | "pending" | "approved" | "rejected";
+
+type WaTemplate = {
+    id: number;
+    name: string;
+    language: string;
+    body_text: string;
+    status: TemplateStatus;
+    meta_template_id: string | null;
+};
+
 type BulkSendResult = {
     success_count: number;
     failed_count: number;
@@ -37,8 +48,28 @@ function previewMessage(template: string, name: string) {
     return template.replace(/\{\{\s*name\s*\}\}/gi, name);
 }
 
+function explainDeliveryError(message: string | null): string | null {
+    if (!message) {
+        return null;
+    }
+    const lower = message.toLowerCase();
+    if (lower.includes("recipient phone number not in allowed list")) {
+        return "Meta still rejected the `to` number. Use full international digits only in contacts (e.g. 919682852240), set WHATSAPP_DEFAULT_CALLING_CODE=91 on the API if you store 10-digit locals, and ensure the allowlist uses the same digits (no +). Also confirm this app’s Phone Number ID / token matches the Meta project where you added the recipient.";
+    }
+    if (lower.includes("re-engagement") || lower.includes("24 hour") || lower.includes("24-hour")) {
+        return "WhatsApp blocks free-form business messages outside the customer care window. Use an approved template (select one above) for cold outreach.";
+    }
+    if (lower.includes("template") && (lower.includes("required") || lower.includes("invalid"))) {
+        return "Check that the template is approved on Meta, the template name matches exactly, and variable counts match your template body.";
+    }
+    return null;
+}
+
 export default function BulkMessagingPage() {
     const [contacts, setContacts] = useState<Contact[]>([]);
+    const [templates, setTemplates] = useState<WaTemplate[]>([]);
+    const [loadingTemplates, setLoadingTemplates] = useState(true);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [messageTemplate, setMessageTemplate] = useState(
         "Hi {{name}}, just checking in with your latest update.",
     );
@@ -68,9 +99,37 @@ export default function BulkMessagingPage() {
         }
     }, []);
 
+    const loadTemplates = useCallback(async () => {
+        const session = getSession();
+        if (!session) {
+            setLoadingTemplates(false);
+            return;
+        }
+        try {
+            const payload = await apiRequest<WaTemplate[]>("/templates", {}, session.access_token);
+            setTemplates(payload);
+        } catch {
+            setTemplates([]);
+        } finally {
+            setLoadingTemplates(false);
+        }
+    }, []);
+
     useEffect(() => {
         void loadContacts();
     }, [loadContacts]);
+
+    useEffect(() => {
+        void loadTemplates();
+    }, [loadTemplates]);
+
+    const approvedTemplates = useMemo(() => {
+        return templates.filter((t) => t.status === "approved" && t.meta_template_id);
+    }, [templates]);
+
+    const selectedTemplate = useMemo(() => {
+        return templates.find((t) => t.id === selectedTemplateId) ?? null;
+    }, [templates, selectedTemplateId]);
 
     const filteredContacts = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -99,7 +158,11 @@ export default function BulkMessagingPage() {
         return new Map(contacts.map((contact) => [contact.id, contact]));
     }, [contacts]);
 
-    const previewText = previewMessage(messageTemplate, selectedPreviewContact?.name ?? "Contact");
+    const previewText = selectedTemplate
+        ? selectedTemplate.body_text
+              .replace(/\{\{\s*1\s*\}\}/g, selectedPreviewContact?.name ?? "Contact")
+              .replace(/\{\{\s*2\s*\}\}/g, selectedPreviewContact?.phone ?? "+10000000000")
+        : previewMessage(messageTemplate, selectedPreviewContact?.name ?? "Contact");
 
     function toggleContact(contactId: number) {
         setSelectedContactIds((prev) => {
@@ -141,14 +204,18 @@ export default function BulkMessagingPage() {
         setErrorMessage(null);
 
         try {
+            const body: Record<string, unknown> = {
+                message_template: selectedTemplate ? "" : messageTemplate,
+                contact_ids: selectedContactIds,
+            };
+            if (selectedTemplateId != null) {
+                body.template_id = selectedTemplateId;
+            }
             const data = await apiRequest<BulkSendResult>(
                 "/bulk-send",
                 {
                     method: "POST",
-                    body: JSON.stringify({
-                        message_template: messageTemplate,
-                        contact_ids: selectedContactIds,
-                    }),
+                    body: JSON.stringify(body),
                 },
                 session.access_token,
             );
@@ -174,22 +241,61 @@ export default function BulkMessagingPage() {
                     Bulk Messaging
                 </h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                    Write a reusable template, pick recipients, preview personalization, and send in one flow.
+                    For Meta WhatsApp Cloud, choose an approved message template for business-initiated sends. Free-form text
+                    only works inside the 24-hour customer care window.
                 </p>
             </section>
 
             <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Message Template</CardTitle>
-                        <CardDescription>Use variables like {"{{name}}"} to personalize each message.</CardDescription>
+                        <CardTitle>Message</CardTitle>
+                        <CardDescription>
+                            WhatsApp template (Meta): {"{{1}}"} is filled with the contact name, {"{{2}}"} with phone. Or
+                            use free-form text only if the user messaged you within 24 hours.
+                        </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <label htmlFor="wa-template-select" className="text-sm font-medium text-slate-800">
+                                Approved WhatsApp template
+                            </label>
+                            <select
+                                id="wa-template-select"
+                                value={selectedTemplateId ?? ""}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setSelectedTemplateId(v === "" ? null : Number(v));
+                                }}
+                                disabled={loadingTemplates}
+                                className="w-full rounded-2xl border border-input bg-background px-4 py-2.5 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                                <option value="">
+                                    {loadingTemplates ? "Loading templates…" : "— Free-form only (24h session) —"}
+                                </option>
+                                {approvedTemplates.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                        {t.name} ({t.language})
+                                    </option>
+                                ))}
+                            </select>
+                            {approvedTemplates.length === 0 && !loadingTemplates ? (
+                                <p className="text-xs text-amber-800">
+                                    No approved templates found. Create and submit one on the Campaigns page, then refresh.
+                                </p>
+                            ) : null}
+                        </div>
+
                         <textarea
                             value={messageTemplate}
                             onChange={(event) => setMessageTemplate(event.target.value)}
-                            className="min-h-36 w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-                            placeholder="Type your campaign message"
+                            disabled={Boolean(selectedTemplate)}
+                            className="min-h-36 w-full rounded-2xl border border-input bg-background px-4 py-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                            placeholder={
+                                selectedTemplate
+                                    ? "Using Meta template body (see preview below)"
+                                    : "Type your campaign message (use {{name}} for contact name)"
+                            }
                         />
 
                         <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-4">
@@ -208,7 +314,13 @@ export default function BulkMessagingPage() {
                         <CardDescription>{selectedContactIds.length} contacts selected</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <Button onClick={handleSend} className="w-full gap-2" disabled={isSending || !messageTemplate.trim()}>
+                        <Button
+                            onClick={handleSend}
+                            className="w-full gap-2"
+                            disabled={
+                                isSending || (!selectedTemplate && !messageTemplate.trim())
+                            }
+                        >
                             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizonal className="h-4 w-4" />}
                             {isSending ? "Sending..." : "Send Bulk Message"}
                         </Button>
@@ -239,6 +351,7 @@ export default function BulkMessagingPage() {
                                                     const contact = contactsById.get(item.contact_id);
                                                     const displayName = contact?.name ?? `Contact #${item.contact_id}`;
                                                     const statusLabel = item.status === "accepted" ? "Accepted" : "Failed";
+                                                    const deliveryHint = explainDeliveryError(item.error);
 
                                                     return (
                                                         <TableRow key={`${item.contact_id}-${item.phone ?? "none"}`}>
@@ -247,7 +360,14 @@ export default function BulkMessagingPage() {
                                                                 {statusLabel}
                                                             </TableCell>
                                                             <TableCell className="text-slate-600">
-                                                                {item.message_id ? item.message_id : item.error ?? "-"}
+                                                                {item.message_id ? (
+                                                                    item.message_id
+                                                                ) : (
+                                                                    <div className="space-y-1">
+                                                                        <p>{item.error ?? "-"}</p>
+                                                                        {deliveryHint ? <p className="text-xs text-amber-700">{deliveryHint}</p> : null}
+                                                                    </div>
+                                                                )}
                                                             </TableCell>
                                                         </TableRow>
                                                     );

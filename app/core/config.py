@@ -31,6 +31,14 @@ class Settings(BaseSettings):
         default=None,
         alias="WHATSAPP_ACCESS_TOKEN",
     )
+    whatsapp_default_calling_code: str | None = Field(
+        default=None,
+        alias="WHATSAPP_DEFAULT_CALLING_CODE",
+        description=(
+            "Optional ITU country calling code (no +), e.g. 91 for India. "
+            "When set, 10-digit numbers stored without a country code are prefixed for Meta API `to`."
+        ),
+    )
     meta_graph_api_base_url: str = Field(
         default="https://graph.facebook.com",
         alias="META_GRAPH_API_BASE_URL",
@@ -63,6 +71,10 @@ class Settings(BaseSettings):
         default="bulk-messages",
         alias="CELERY_DEFAULT_QUEUE",
     )
+    celery_webhook_queue: str = Field(
+        default="webhooks",
+        alias="CELERY_WEBHOOK_QUEUE",
+    )
     celery_result_ttl_seconds: int = Field(
         default=86400,
         alias="CELERY_RESULT_TTL_SECONDS",
@@ -91,6 +103,20 @@ class Settings(BaseSettings):
         default=1,
         alias="QUEUE_WORKSPACE_RATE_LIMIT_WINDOW_SECONDS",
     )
+    webhook_dispatch_max_retries: int = Field(
+        default=5,
+        alias="WEBHOOK_DISPATCH_MAX_RETRIES",
+    )
+    webhook_dedupe_ttl_seconds: int = Field(
+        default=900,
+        alias="WEBHOOK_DEDUPE_TTL_SECONDS",
+    )
+    webhook_ingest_rate_limit_per_ip_per_minute: int = Field(
+        default=0,
+        alias="WEBHOOK_INGEST_RATE_LIMIT_PER_IP_PER_MINUTE",
+        description="0 disables per-IP sliding window limiting on webhook HTTP ingress.",
+    )
+    queue_dlq_enabled: bool = Field(default=True, alias="QUEUE_DLQ_ENABLED")
     meta_credentials_encryption_key: str = Field(
         default="change-this-meta-encryption-key",
         alias="META_CREDENTIALS_ENCRYPTION_KEY",
@@ -158,6 +184,18 @@ class Settings(BaseSettings):
         normalized = value.strip().lower()
         if not normalized:
             return None
+        return normalized
+
+    @field_validator("whatsapp_default_calling_code")
+    @classmethod
+    def validate_whatsapp_default_calling_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = "".join(ch for ch in value.strip() if ch.isdigit())
+        if not normalized or len(normalized) > 3:
+            raise ValueError(
+                "WHATSAPP_DEFAULT_CALLING_CODE must be 1-3 digits (e.g. 91), no plus sign",
+            )
         return normalized
 
     @field_validator("whatsapp_provider")
@@ -256,12 +294,12 @@ class Settings(BaseSettings):
             raise ValueError("REDIS_URL cannot be empty")
         return normalized
 
-    @field_validator("celery_default_queue")
+    @field_validator("celery_default_queue", "celery_webhook_queue")
     @classmethod
-    def validate_celery_default_queue(cls, value: str) -> str:
+    def validate_celery_queue_names(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
-            raise ValueError("CELERY_DEFAULT_QUEUE cannot be empty")
+            raise ValueError("Celery queue name cannot be empty")
         return normalized
 
     @field_validator("celery_result_ttl_seconds")
@@ -279,11 +317,28 @@ class Settings(BaseSettings):
         "queue_inflight_ttl_seconds",
         "queue_workspace_rate_limit_count",
         "queue_workspace_rate_limit_window_seconds",
+        "webhook_dedupe_ttl_seconds",
     )
     @classmethod
     def validate_positive_queue_settings(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("Queue numeric settings must be greater than 0")
+        return value
+
+    @field_validator("webhook_dispatch_max_retries")
+    @classmethod
+    def validate_webhook_dispatch_max_retries(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("WEBHOOK_DISPATCH_MAX_RETRIES must be at least 1")
+        return value
+
+    @field_validator("webhook_ingest_rate_limit_per_ip_per_minute")
+    @classmethod
+    def validate_webhook_ingest_rate_limit(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                "WEBHOOK_INGEST_RATE_LIMIT_PER_IP_PER_MINUTE must be 0 or greater"
+            )
         return value
 
 
