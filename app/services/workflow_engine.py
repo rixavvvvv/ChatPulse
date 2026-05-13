@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 from datetime import datetime
 from typing import Any, Callable
 
@@ -16,6 +15,12 @@ from app.models.workflow import (
     WorkflowNode,
 )
 from app.services import workflow_service
+from app.services.expression_evaluator import (
+    ExpressionEvaluator,
+    ExpressionSyntaxError,
+    ExpressionEvaluationError,
+    get_metrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +29,7 @@ class WorkflowTraversalEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
         self._node_handlers: dict[NodeType, Callable] = {}
+        self._expression_evaluator = ExpressionEvaluator()
         self._register_default_handlers()
 
     def _register_default_handlers(self):
@@ -258,26 +264,21 @@ class WorkflowTraversalEngine:
         }
 
     def _evaluate_expression(self, expression: str, context: dict[str, Any]) -> bool:
+        """
+        Safely evaluate a workflow condition expression.
+
+        Uses AST-based evaluation to prevent code injection attacks.
+        """
         try:
-            for key, value in context.items():
-                if isinstance(value, str):
-                    expression = re.sub(rf"\b{key}\b", f'"{value}"', expression)
-                elif isinstance(value, bool):
-                    expression = re.sub(rf"\b{key}\b", str(value), expression)
-                elif isinstance(value, (int, float)):
-                    expression = re.sub(rf"\b{key}\b", str(value), expression)
-
-            allowed_names = {
-                "and": lambda a, b: a and b,
-                "or": lambda a, b: a or b,
-                "not": lambda a: not a,
-                "True": True,
-                "False": False,
-            }
-
-            result = eval(expression, {"__builtins__": allowed_names}, {})
-            return bool(result)
-        except Exception:
+            return self._expression_evaluator.evaluate(expression, context)
+        except ExpressionSyntaxError as e:
+            logger.warning(f"Expression syntax error: {e}")
+            return False
+        except ExpressionEvaluationError as e:
+            logger.warning(f"Expression evaluation error: {e}")
+            return False
+        except Exception as e:
+            logger.exception(f"Unexpected error evaluating expression: {expression}")
             return False
 
     def _build_adjacency_list(self, edges: list[WorkflowEdge]) -> dict[str, list[str]]:
