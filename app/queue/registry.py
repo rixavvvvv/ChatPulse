@@ -37,9 +37,24 @@ def celery_task_routes() -> dict[str, dict[str, Any]]:
     from app.core.config import get_settings
 
     q = get_settings().celery_webhook_queue.strip()
-    return {
+    routes = {
         TASKS.webhook_process_ingestion: {"queue": q},
     }
+
+    # Ecommerce automation routes
+    from app.queue.ecommerce_automation_tasks import ecommerce_automation_routes
+    routes.update(ecommerce_automation_routes())
+
+    # Conversation task routes
+    from app.queue.tasks.conversation_tasks import conversation_task_routes
+    routes.update(conversation_task_routes())
+
+    # Shipment / COD routes
+    routes["ecommerce.track_shipment"] = {"queue": "ecommerce_automation"}
+    routes["ecommerce.cod_verification"] = {"queue": "ecommerce_automation"}
+    routes["ecommerce.cod_payment_confirmed"] = {"queue": "ecommerce_automation"}
+
+    return routes
 
 
 def default_worker_queue_spec(settings_celery_default_queue: str, settings_webhook_queue: str) -> str:

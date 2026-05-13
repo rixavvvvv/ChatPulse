@@ -83,3 +83,36 @@ async def require_workspace_admin(
         raise forbidden_error
 
     return workspace
+
+
+async def get_workspace_id(
+    token: str = Depends(oauth2_scheme),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> int:
+    """Extract and validate workspace_id from JWT token. Returns the integer workspace ID."""
+    unauthorized_error = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate workspace context",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    forbidden_error = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="No access to workspace",
+    )
+
+    try:
+        payload = decode_access_token(token)
+        workspace_id = int(payload.get("workspace_id"))
+    except (TypeError, ValueError):
+        raise unauthorized_error
+
+    membership_stmt = select(Membership).where(
+        Membership.user_id == current_user.id,
+        Membership.workspace_id == workspace_id,
+    )
+    membership = (await session.execute(membership_stmt)).scalar_one_or_none()
+    if not membership:
+        raise forbidden_error
+
+    return workspace_id

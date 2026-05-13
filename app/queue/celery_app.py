@@ -9,7 +9,16 @@ celery_app = Celery(
     "bulk_messaging",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.queue.tasks", "app.queue.webhook_tasks"],
+    include=[
+        "app.queue.tasks",
+        "app.queue.webhook_tasks",
+        "app.queue.trigger_tasks",
+        "app.queue.delayed_tasks",
+        "app.queue.ecommerce_automation_tasks",
+        "app.queue.tasks.shipment_tracking_task",
+        "app.queue.tasks.cod_verification_task",
+        "app.queue.tasks.conversation_tasks",
+    ],
 )
 
 celery_app.conf.update(

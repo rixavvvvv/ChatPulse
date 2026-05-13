@@ -23,6 +23,13 @@ from app.routes.webhook_meta import router as webhook_meta_router
 from app.routes.webhook_order import router as webhook_order_router
 from app.routes.whatsapp import router as whatsapp_router
 from app.routes.workspaces import router as workspace_router
+from app.routes.workflows import router as workflows_router
+from app.routes.workflow_triggers import router as workflow_triggers_router
+from app.routes.workflow_delayed import router as delayed_executions_router, business_hours_router
+from app.routes.ecommerce_automation import router as ecommerce_automation_router, executions_router, all_executions_router, templates_router as ecommerce_templates_router
+from app.routes.conversations import router as conversations_router, labels_router as conversation_labels_router
+from app.routes.agent_presence import router as agent_presence_router
+from app.routes.websocket import router as websocket_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -49,3 +56,15 @@ api_router.include_router(contact_attributes_router)
 api_router.include_router(contact_imports_router)
 api_router.include_router(ecommerce_router)
 api_router.include_router(whatsapp_router)
+api_router.include_router(workflows_router)
+api_router.include_router(workflow_triggers_router)
+api_router.include_router(delayed_executions_router)
+api_router.include_router(business_hours_router)
+api_router.include_router(ecommerce_automation_router)
+api_router.include_router(executions_router)
+api_router.include_router(all_executions_router)
+api_router.include_router(conversations_router)
+api_router.include_router(ecommerce_templates_router)
+api_router.include_router(conversation_labels_router)
+api_router.include_router(agent_presence_router)
+api_router.include_router(websocket_router)

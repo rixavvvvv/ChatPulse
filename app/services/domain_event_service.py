@@ -40,3 +40,8 @@ async def insert_domain_events_for_ingestion(
         )
         inserted += 1
     return inserted
+
+
+async def get_event_by_id(session: AsyncSession, event_id: int) -> DomainEvent | None:
+    """Get a domain event by ID."""
+    return await session.get(DomainEvent, event_id)
