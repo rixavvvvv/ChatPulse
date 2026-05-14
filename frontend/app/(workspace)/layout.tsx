@@ -1,13 +1,9 @@
 "use client";
 
-import Link from "next/link";
+import { AppLayout } from "@/components/layout/app-layout";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, Search } from "lucide-react";
-
-import { SidebarNav } from "@/components/sidebar-nav";
-import { WorkspaceSwitcher } from "@/components/workspace-switcher";
-import { getSession } from "@/lib/session";
+import { useAuthStore } from "@/stores/auth";
 
 export default function WorkspaceLayout({
     children,
@@ -15,70 +11,17 @@ export default function WorkspaceLayout({
     children: React.ReactNode;
 }>) {
     const router = useRouter();
+    const { isAuthenticated } = useAuthStore();
 
     useEffect(() => {
-        const session = getSession();
-        if (!session) {
-            router.replace("/login");
+        if (!isAuthenticated) {
+            router.push("/login");
         }
-    }, [router]);
+    }, [isAuthenticated, router]);
 
-    return (
-        <div className="min-h-screen">
-            <SidebarNav />
+    if (!isAuthenticated) {
+        return null;
+    }
 
-            <header className="sticky top-0 z-10 hidden border-b border-border/60 bg-white/75 backdrop-blur md:block md:pl-72">
-                <div className="container flex items-center justify-between py-4">
-                    <div className="flex w-full max-w-md items-center gap-2 rounded-xl border border-border/80 bg-white px-3 py-2">
-                        <Search className="h-4 w-4 text-slate-500" />
-                        <input
-                            aria-label="Search"
-                            placeholder="Search contacts, campaigns..."
-                            className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
-                        />
-                    </div>
-
-                    <div className="ml-6 flex items-center gap-3">
-                        <WorkspaceSwitcher />
-                    </div>
-                </div>
-            </header>
-
-            <header className="sticky top-0 z-10 border-b border-border/60 bg-white/70 backdrop-blur md:hidden">
-                <div className="container flex items-center justify-between py-4">
-                    <p className="font-[var(--font-space-grotesk)] text-lg font-semibold">Bulk Messaging</p>
-                    <div className="flex items-center gap-2">
-                        <Link href="/onboarding" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                            Onboarding
-                        </Link>
-                        <Link href="/dashboard" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                            Dashboard
-                        </Link>
-                        <Link href="/campaigns" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                            Campaigns
-                        </Link>
-                        <Link href="/contacts" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                            Contacts
-                        </Link>
-                        <Link href="/bulk-messaging" className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                            Bulk
-                        </Link>
-                        <Link
-                            href="/integrations/shopify"
-                            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                        >
-                            Shopify
-                        </Link>
-                        <span className="rounded-lg border border-border p-2 text-slate-600">
-                            <Menu className="h-4 w-4" />
-                        </span>
-                    </div>
-                </div>
-            </header>
-
-            <div className="md:pl-72">
-                <main className="container py-8 md:py-10">{children}</main>
-            </div>
-        </div>
-    );
+    return <AppLayout>{children}</AppLayout>;
 }

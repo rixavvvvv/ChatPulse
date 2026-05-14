@@ -9,13 +9,24 @@
         "lint": "next lint"
     },
     "dependencies": {
+        "@hookform/resolvers": "^3.3.4",
+        "@tanstack/react-query": "^5.28.0",
+        "@tanstack/react-table": "^8.17.3",
+        "axios": "^1.6.7",
         "class-variance-authority": "^0.7.0",
         "clsx": "^2.1.1",
+        "framer-motion": "^10.16.16",
         "lucide-react": "^0.469.0",
         "next": "14.2.12",
+        "next-themes": "^0.2.1",
         "react": "18.3.1",
         "react-dom": "18.3.1",
-        "tailwind-merge": "^2.5.2"
+        "react-hook-form": "^7.48.0",
+        "react-hot-toast": "^2.4.1",
+        "socket.io-client": "^4.7.2",
+        "tailwind-merge": "^2.5.2",
+        "zustand": "^4.4.1",
+        "zod": "^3.22.4"
     },
     "devDependencies": {
         "@types/node": "^22.7.5",

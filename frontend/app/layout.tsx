@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
+import { RootProvider } from "@/providers/root-provider";
 
 const manrope = Manrope({
     subsets: ["latin"],
@@ -14,8 +15,8 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-    title: "Bulk Messaging",
-    description: "Bulk messaging dashboard starter built with Next.js",
+    title: "ChatPulse - Bulk Messaging Platform",
+    description: "Professional bulk messaging and communication management platform",
 };
 
 export default function RootLayout({
@@ -24,9 +25,11 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <html lang="en">
+        <html lang="en" suppressHydrationWarning>
             <body className={`${manrope.variable} ${spaceGrotesk.variable} font-[var(--font-manrope)]`}>
-                {children}
+                <RootProvider>
+                    {children}
+                </RootProvider>
             </body>
         </html>
     );
