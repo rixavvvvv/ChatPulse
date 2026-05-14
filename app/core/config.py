@@ -121,6 +121,26 @@ class Settings(BaseSettings):
         default="change-this-meta-encryption-key",
         alias="META_CREDENTIALS_ENCRYPTION_KEY",
     )
+    workflow_execution_timeout_seconds: int = Field(
+        default=3600,
+        alias="WORKFLOW_EXECUTION_TIMEOUT_SECONDS",
+        description="Global default timeout for workflow executions in seconds (1 hour)",
+    )
+    workflow_node_timeout_seconds: int = Field(
+        default=300,
+        alias="WORKFLOW_NODE_TIMEOUT_SECONDS",
+        description="Default timeout per workflow node in seconds (5 minutes)",
+    )
+    workflow_cancellation_grace_period_seconds: int = Field(
+        default=30,
+        alias="WORKFLOW_CANCELLATION_GRACE_PERIOD_SECONDS",
+        description="Grace period for cancellation propagation in seconds (30 seconds)",
+    )
+    workflow_timeout_check_interval_seconds: int = Field(
+        default=60,
+        alias="WORKFLOW_TIMEOUT_CHECK_INTERVAL_SECONDS",
+        description="Interval for checking execution timeouts in seconds (1 minute)",
+    )
 
     database_url: str = Field(
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/bulk_messaging",
@@ -227,6 +247,14 @@ class Settings(BaseSettings):
     def validate_database_max_overflow(cls, value: int) -> int:
         if value < 0:
             raise ValueError("DATABASE_MAX_OVERFLOW must be 0 or greater")
+        return value
+
+    @field_validator("workflow_execution_timeout_seconds", "workflow_node_timeout_seconds", "workflow_cancellation_grace_period_seconds", "workflow_timeout_check_interval_seconds")
+    @classmethod
+    def validate_workflow_timeouts(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                "Workflow timeout settings must be greater than 0")
         return value
 
     @field_validator("meta_graph_api_base_url")

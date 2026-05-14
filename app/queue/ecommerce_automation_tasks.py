@@ -59,11 +59,18 @@ class ProcessOrderTask(LongRunningTask):
                 )
 
                 executed = []
+                skipped_duplicate = 0
                 for automation in automations:
                     try:
                         from app.services import ecommerce_automation_service
+                        from app.services.atomic_deduplication import generate_idempotency_key
 
-                        execution = await ecommerce_automation_service.create_execution(
+                        # Generate idempotency key for atomic deduplication
+                        idempotency_key = generate_idempotency_key(
+                            "order", automation.id, str(order_id)
+                        )
+
+                        execution, created = await ecommerce_automation_service.create_execution(
                             db,
                             workspace_id=workspace_id,
                             automation_id=automation.id,
@@ -71,7 +78,17 @@ class ProcessOrderTask(LongRunningTask):
                             cart_id=order_data.get("cart_id"),
                             contact_id=contact_id,
                             trigger_data=order_data,
+                            idempotency_key=idempotency_key,
                         )
+
+                        # Skip if already exists (atomic duplicate prevention)
+                        if not created:
+                            skipped_duplicate += 1
+                            logger.info(
+                                "Skipping duplicate execution for automation %d, order %s",
+                                automation.id, order_id
+                            )
+                            continue
 
                         if automation.delay_seconds > 0:
                             delayed = await self._schedule_delayed_execution(
@@ -207,18 +224,35 @@ class ProcessCartAbandonmentTask(LongRunningTask):
                 automations = await self._get_abandoned_cart_automations(db, workspace_id)
 
                 executed = []
+                skipped_duplicate = 0
                 for automation in automations:
                     try:
                         from app.services import ecommerce_automation_service
+                        from app.services.atomic_deduplication import generate_idempotency_key
 
-                        execution = await ecommerce_automation_service.create_execution(
+                        # Generate idempotency key for atomic deduplication
+                        idempotency_key = generate_idempotency_key(
+                            "cart", automation.id, str(cart_id)
+                        )
+
+                        execution, created = await ecommerce_automation_service.create_execution(
                             db,
                             workspace_id=workspace_id,
                             automation_id=automation.id,
                             cart_id=str(cart_id),
                             contact_id=contact_id,
                             trigger_data=cart_data,
+                            idempotency_key=idempotency_key,
                         )
+
+                        # Skip if already exists (atomic duplicate prevention)
+                        if not created:
+                            skipped_duplicate += 1
+                            logger.info(
+                                "Skipping duplicate cart recovery for automation %d, cart %s",
+                                automation.id, cart_id
+                            )
+                            continue
 
                         trigger_config = automation.trigger_config.get("config", {})
                         cart_idle_minutes = trigger_config.get("cart_idle_minutes", 60)
@@ -246,6 +280,7 @@ class ProcessCartAbandonmentTask(LongRunningTask):
                     "status": "processed",
                     "cart_id": cart_id,
                     "recovery_automations_triggered": len(executed),
+                    "duplicates_skipped": skipped_duplicate,
                 }
 
         loop = asyncio.new_event_loop()

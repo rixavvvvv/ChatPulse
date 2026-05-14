@@ -53,6 +53,11 @@ class WorkflowDefinition(Base):
         default=dict,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    timeout_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        description="Per-workflow execution timeout in seconds. Null uses global default.",
+    )
     created_by: Mapped[int] = mapped_column(
         ForeignKey("users.id"),
         nullable=False,
@@ -104,7 +109,8 @@ class WorkflowNode(Base):
     )
 
     __table_args__ = (
-        Index("ix_workflow_nodes_definition_node", "workflow_definition_id", "node_id", unique=True),
+        Index("ix_workflow_nodes_definition_node",
+              "workflow_definition_id", "node_id", unique=True),
     )
 
 
@@ -128,7 +134,8 @@ class WorkflowEdge(Base):
     )
 
     __table_args__ = (
-        Index("ix_workflow_edges_definition_source_target", "workflow_definition_id", "source_node_id", "target_node_id"),
+        Index("ix_workflow_edges_definition_source_target",
+              "workflow_definition_id", "source_node_id", "target_node_id"),
     )
 
 
@@ -146,7 +153,8 @@ class WorkflowExecution(Base):
         nullable=False,
         index=True,
     )
-    execution_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    execution_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True)
     status: Mapped[ExecutionStatus] = mapped_column(
         SqlEnum(ExecutionStatus, name="execution_status"),
         nullable=False,
@@ -162,9 +170,33 @@ class WorkflowExecution(Base):
         nullable=False,
         default=dict,
     )
-    current_node_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_node_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True)
+    timeout_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        description="Execution-specific timeout override in seconds",
+    )
+    timeout_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        description="Computed timeout deadline",
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        description="Timestamp when cancellation was requested",
+    )
+    cancellation_reason: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        description="Reason for cancellation (e.g., 'timeout', 'user_request')",
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -172,7 +204,8 @@ class WorkflowExecution(Base):
         nullable=False,
     )
 
-    definition: Mapped["WorkflowDefinition"] = relationship(back_populates="executions")
+    definition: Mapped["WorkflowDefinition"] = relationship(
+        back_populates="executions")
     node_executions: Mapped[list["NodeExecution"]] = relationship(
         back_populates="execution",
         cascade="all, delete-orphan",
@@ -180,6 +213,7 @@ class WorkflowExecution(Base):
 
     __table_args__ = (
         Index("ix_workflow_executions_status", "workspace_id", "status"),
+        Index("ix_workflow_executions_timeout", "workspace_id", "timeout_at"),
     )
 
 
@@ -192,7 +226,8 @@ class NodeExecution(Base):
         nullable=False,
         index=True,
     )
-    node_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True)
     node_type: Mapped[NodeType] = mapped_column(
         SqlEnum(NodeType, name="node_execution_type"),
         nullable=False,
@@ -212,18 +247,35 @@ class NodeExecution(Base):
         nullable=False,
         default=dict,
     )
+    timeout_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        description="Per-node timeout override in seconds",
+    )
+    timeout_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        description="Computed node timeout deadline",
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )
 
-    execution: Mapped["WorkflowExecution"] = relationship(back_populates="node_executions")
+    execution: Mapped["WorkflowExecution"] = relationship(
+        back_populates="node_executions")
 
     __table_args__ = (
-        Index("ix_node_executions_execution_node", "workflow_execution_id", "node_id"),
+        Index("ix_node_executions_execution_node",
+              "workflow_execution_id", "node_id"),
+        Index("ix_node_executions_timeout",
+              "workflow_execution_id", "timeout_at"),
     )

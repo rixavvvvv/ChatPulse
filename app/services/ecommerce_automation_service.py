@@ -175,39 +175,88 @@ async def create_execution(
     cart_id: str | None,
     contact_id: int | None,
     trigger_data: dict[str, Any],
-) -> EcommerceAutomationExecution:
-    existing = await db.execute(
-        select(EcommerceAutomationExecution).where(
-            and_(
-                EcommerceAutomationExecution.automation_id == automation_id,
-                EcommerceAutomationExecution.order_id == order_id,
-                EcommerceAutomationExecution.status.in_([
-                    ExecutionStatus.pending,
-                    ExecutionStatus.scheduled,
-                    ExecutionStatus.sent,
-                ]),
+    idempotency_key: str | None = None,
+) -> tuple[EcommerceAutomationExecution, bool]:
+    """
+    Create an ecommerce execution with atomic duplicate prevention.
+
+    Uses PostgreSQL INSERT ... ON CONFLICT for true atomicity.
+
+    Args:
+        db: Database session
+        workspace_id: Workspace ID
+        automation_id: Automation ID
+        order_id: Order ID (optional)
+        cart_id: Cart ID (optional)
+        contact_id: Contact ID
+        trigger_data: Trigger event data
+        idempotency_key: Optional idempotency key for fine-grained deduplication
+
+    Returns:
+        Tuple of (execution, created) where created=True if new execution was created
+    """
+    from sqlalchemy.dialects.postgresql import insert
+    from app.models.ecommerce_automation import EcommerceAutomationExecution, ExecutionStatus
+
+    execution_id_str = generate_execution_id()
+
+    # Build values dict
+    values = {
+        "workspace_id": workspace_id,
+        "automation_id": automation_id,
+        "execution_id": execution_id_str,
+        "order_id": order_id,
+        "cart_id": cart_id,
+        "contact_id": contact_id,
+        "status": ExecutionStatus.pending,
+        "trigger_data": trigger_data,
+        "message_payload": {},
+    }
+
+    if idempotency_key:
+        values["idempotency_key"] = idempotency_key
+
+    # Use execution_id unique constraint as fallback
+    index_elements = ["execution_id"]
+    if idempotency_key:
+        index_elements = ["automation_id", "idempotency_key"]
+
+    # Atomic upsert - only inserts if no conflict
+    stmt = insert(EcommerceAutomationExecution).values(**values).on_conflict_do_nothing(
+        index_elements=index_elements
+    ).returning(EcommerceAutomationExecution)
+
+    result = await db.execute(stmt)
+    execution = result.scalar_one_or_none()
+
+    if execution is not None:
+        await db.commit()
+        return execution, True
+
+    # Conflict occurred - fetch existing execution
+    if idempotency_key:
+        existing = await db.execute(
+            select(EcommerceAutomationExecution).where(
+                and_(
+                    EcommerceAutomationExecution.automation_id == automation_id,
+                    EcommerceAutomationExecution.idempotency_key == idempotency_key,
+                )
             )
         )
-    )
-    if existing.scalar_one_or_none():
-        raise ValueError("Duplicate execution exists for this order")
+    else:
+        existing = await db.execute(
+            select(EcommerceAutomationExecution).where(
+                EcommerceAutomationExecution.execution_id == execution_id_str
+            )
+        )
 
-    execution = EcommerceAutomationExecution(
-        workspace_id=workspace_id,
-        automation_id=automation_id,
-        order_id=order_id,
-        cart_id=cart_id,
-        contact_id=contact_id,
-        execution_id=generate_execution_id(),
-        status=ExecutionStatus.pending,
-        trigger_data=trigger_data,
-        message_payload={},
-    )
+    existing_exec = existing.scalar_one_or_none()
+    if existing_exec:
+        await db.rollback()
+        return existing_exec, False
 
-    db.add(execution)
-    await db.commit()
-    await db.refresh(execution)
-    return execution
+    # Should not reach here, but handle gracefully
+    raise ValueError("Failed to create ecommerce execution")
 
 
 async def get_execution(

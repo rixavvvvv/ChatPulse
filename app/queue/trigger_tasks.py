@@ -6,6 +6,7 @@ This module provides:
 2. Idempotency guarantees
 3. Duplicate prevention
 4. Metrics collection
+5. Workspace isolation validation
 """
 
 import logging
@@ -19,6 +20,12 @@ from app.models.workflow_trigger import TriggerExecutionStatus
 from app.queue.base_tasks import IdempotencyMixin, LongRunningTask
 from app.services import workflow_engine, trigger_matching_engine, trigger_service
 from app.services.domain_event_service import get_event_by_id
+from app.services.workspace_security import (
+    WorkspaceAccessDenied,
+    WorkspaceValidationError,
+    validate_trigger_ownership,
+    require_workspace_id,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -78,6 +85,7 @@ class ProcessEventTask(LongRunningTask):
                             trigger_id=trigger.id,
                             event_id=event_id,
                             dedupe_key=dedupe_key,
+                            workspace_id=workspace_id,  # Pass workspace_id for ownership validation
                         )
                     ).apply_async()
 
@@ -126,9 +134,33 @@ class ExecuteWorkflowTask(LongRunningTask):
         trigger_id: int,
         event_id: int,
         dedupe_key: str,
+        workspace_id: int,
     ) -> dict:
+        """
+        Execute workflow triggered by an event.
+
+        Args:
+            trigger_id: ID of the workflow trigger
+            event_id: ID of the triggering event
+            dedupe_key: Idempotency key for duplicate prevention
+            workspace_id: Workspace ID for ownership validation (REQUIRED)
+
+        Returns:
+            Execution result dict
+
+        Raises:
+            WorkspaceValidationError: If workspace_id is invalid
+            WorkspaceAccessDenied: If trigger doesn't belong to workspace
+        """
         import asyncio
         from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
+        # Validate workspace_id is provided and valid
+        try:
+            require_workspace_id(workspace_id, "trigger.execute_workflow")
+        except WorkspaceValidationError as e:
+            logger.error("Invalid workspace_id in trigger execution: %s", e)
+            return {"status": "invalid_workspace_id", "error": str(e)}
 
         engine = create_async_engine(settings.database_url, echo=False)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -137,8 +169,21 @@ class ExecuteWorkflowTask(LongRunningTask):
             async with async_session() as db:
                 start_time = time.time()
 
-                trigger = await trigger_service.get_trigger_by_id(db, trigger_id, 0)
-                if not trigger or trigger.status != "active":
+                # Validate trigger ownership using workspace isolation
+                try:
+                    trigger = await validate_trigger_ownership(db, trigger_id, workspace_id)
+                except WorkspaceAccessDenied as e:
+                    logger.warning(
+                        "Workspace isolation violation in trigger execution: trigger_id=%d, "
+                        "requested_workspace=%d, actual_workspace=%d",
+                        trigger_id, workspace_id, e.actual_workspace
+                    )
+                    return {"status": "access_denied", "error": str(e)}
+                except WorkspaceValidationError as e:
+                    logger.error("Trigger validation failed: %s", e)
+                    return {"status": "trigger_not_found", "error": str(e)}
+
+                if trigger.status != "active":
                     return {"status": "trigger_inactive"}
 
                 existing = await trigger_service.get_execution_by_dedupe(db, dedupe_key, trigger_id)
@@ -160,7 +205,7 @@ class ExecuteWorkflowTask(LongRunningTask):
                 event = await get_event_by_id(db, event_id)
                 event_payload = event.payload if event else {}
 
-                execution = await trigger_service.create_trigger_execution(
+                execution, created = await trigger_service.create_trigger_execution(
                     db,
                     workspace_id=trigger.workspace_id,
                     workflow_trigger_id=trigger_id,
@@ -169,6 +214,15 @@ class ExecuteWorkflowTask(LongRunningTask):
                     event_payload=event_payload,
                 )
 
+                # If execution already existed (duplicate), return early
+                if not created:
+                    logger.info("Trigger execution already exists for dedupe_key: %s", dedupe_key)
+                    return {
+                        "status": "duplicate_execution",
+                        "execution_id": execution.id,
+                        "execution_status": execution.status.value,
+                    }
+
                 await trigger_service.update_trigger_execution(
                     db,
                     execution,
@@ -176,24 +230,38 @@ class ExecuteWorkflowTask(LongRunningTask):
                     started_at=datetime.utcnow(),
                 )
 
-                workflow = await trigger_service.get_trigger_by_id(db, trigger_id, trigger.workspace_id)
-                workflow_def = await db.get(workflow.workflow_definition_id)
-
-                from sqlalchemy.orm import selectinload
-                from app.models.workflow import WorkflowDefinition
-                stmt = select(WorkflowDefinition).where(WorkflowDefinition.id == workflow.workflow_definition_id)
-                result = await db.execute(stmt)
-                workflow_def = result.scalar_one_or_none()
-
-                if not workflow_def:
+                # Validate workflow ownership using workspace isolation
+                try:
+                    from app.services.workspace_security import validate_workflow_ownership
+                    workflow_def = await validate_workflow_ownership(
+                        db,
+                        trigger.workflow_definition_id,
+                        workspace_id,
+                    )
+                except WorkspaceAccessDenied as e:
+                    logger.warning(
+                        "Workspace isolation violation: workflow owned by workspace %d, "
+                        "access attempted by workspace %d",
+                        e.actual_workspace, workspace_id
+                    )
                     await trigger_service.update_trigger_execution(
                         db,
                         execution,
                         status=TriggerExecutionStatus.failed,
-                        error="Workflow definition not found",
+                        error="Workflow access denied",
                         completed_at=datetime.utcnow(),
                     )
-                    return {"status": "workflow_not_found"}
+                    return {"status": "access_denied", "error": "Workflow belongs to different workspace"}
+                except WorkspaceValidationError as e:
+                    logger.error("Workflow validation failed: %s", e)
+                    await trigger_service.update_trigger_execution(
+                        db,
+                        execution,
+                        status=TriggerExecutionStatus.failed,
+                        error="Workflow not found",
+                        completed_at=datetime.utcnow(),
+                    )
+                    return {"status": "workflow_not_found", "error": str(e)}
 
                 from sqlalchemy import select
                 from app.models.workflow import WorkflowNode, WorkflowEdge

@@ -133,19 +133,61 @@ async def create_trigger_execution(
     event_id: int,
     dedupe_key: str,
     event_payload: dict[str, Any],
-) -> TriggerExecution:
-    execution = TriggerExecution(
-        workspace_id=workspace_id,
-        workflow_trigger_id=workflow_trigger_id,
-        event_id=event_id,
-        dedupe_key=dedupe_key,
-        status=TriggerExecutionStatus.pending,
-        event_payload=event_payload,
+) -> tuple[TriggerExecution, bool]:
+    """
+    Create a trigger execution with atomic duplicate prevention.
+
+    Uses PostgreSQL INSERT ... ON CONFLICT for true atomicity.
+
+    Args:
+        db: Database session
+        workspace_id: Workspace ID
+        workflow_trigger_id: Trigger ID
+        event_id: Event ID
+        dedupe_key: Idempotency key
+        event_payload: Event data
+
+    Returns:
+        Tuple of (execution, created) where created=True if new execution was created
+    """
+    from sqlalchemy.dialects.postgresql import insert
+
+    values = {
+        "workspace_id": workspace_id,
+        "workflow_trigger_id": workflow_trigger_id,
+        "event_id": event_id,
+        "dedupe_key": dedupe_key,
+        "status": TriggerExecutionStatus.pending,
+        "event_payload": event_payload,
+    }
+
+    stmt = insert(TriggerExecution).values(**values).on_conflict_do_nothing(
+        index_elements=["workflow_trigger_id", "dedupe_key"]
+    ).returning(TriggerExecution)
+
+    result = await db.execute(stmt)
+    execution = result.scalar_one_or_none()
+
+    if execution is not None:
+        await db.commit()
+        return execution, True
+
+    # Conflict occurred - fetch existing execution
+    existing = await db.execute(
+        select(TriggerExecution).where(
+            and_(
+                TriggerExecution.workflow_trigger_id == workflow_trigger_id,
+                TriggerExecution.dedupe_key == dedupe_key,
+            )
+        )
     )
-    db.add(execution)
-    await db.commit()
-    await db.refresh(execution)
-    return execution
+    existing_exec = existing.scalar_one_or_none()
+    if existing_exec:
+        await db.rollback()
+        return existing_exec, False
+
+    # Should not reach here, but handle gracefully
+    raise ValueError("Failed to create trigger execution")
 
 
 async def get_trigger_execution(

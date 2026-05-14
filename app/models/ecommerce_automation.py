@@ -145,6 +145,10 @@ class EcommerceAutomationExecution(Base):
     )
 
     execution_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+
+    # Idempotency key for duplicate prevention - unique per automation
+    idempotency_key: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+
     status: Mapped[ExecutionStatus] = mapped_column(
         SqlEnum(ExecutionStatus, name="ecommerce_execution_status"),
         nullable=False,
@@ -185,6 +189,9 @@ class EcommerceAutomationExecution(Base):
     __table_args__ = (
         Index("ix_automation_execution_status", "automation_id", "status"),
         Index("ix_automation_execution_order", "order_id", "status"),
+        Index("ix_automation_execution_idempotency", "automation_id", "idempotency_key", unique=True),
+        # Partial unique constraint: prevents duplicate pending/scheduled executions per automation
+        # Use idempotency_key for fine-grained control
     )
 
 

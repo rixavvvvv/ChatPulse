@@ -174,51 +174,79 @@ async def create_delayed_execution(
     trigger_data: dict[str, Any],
     max_retries: int = 3,
     idempotency_key: str | None = None,
-) -> DelayedExecution:
+) -> tuple[DelayedExecution, bool]:
+    """
+    Create a delayed execution with atomic duplicate prevention.
+
+    Uses PostgreSQL INSERT ... ON CONFLICT for true atomicity.
+
+    Args:
+        db: Database session
+        workspace_id: Workspace ID
+        workflow_definition_id: Workflow definition ID
+        delay_type: Type of delay
+        delay_config: Delay configuration
+        context: Execution context
+        trigger_data: Trigger event data
+        max_retries: Maximum retry attempts
+        idempotency_key: Optional idempotency key for deduplication
+
+    Returns:
+        Tuple of (execution, created) where created=True if new execution was created
+    """
+    from sqlalchemy.dialects.postgresql import insert
+
     if not idempotency_key:
         idempotency_key = generate_idempotency_key(
             workspace_id, workflow_definition_id, trigger_data, delay_config
         )
 
-    existing = await db.execute(
-        select(DelayedExecution).where(
-            and_(
-                DelayedExecution.idempotency_key == idempotency_key,
-                DelayedExecution.status.in_([
-                    DelayedExecutionStatus.scheduled,
-                    DelayedExecutionStatus.pending,
-                    DelayedExecutionStatus.running,
-                ]),
-            )
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise ValueError("Duplicate delayed execution exists")
-
+    # Calculate scheduled time first (needed for insert)
     scheduled_at, window_start, window_end = await calculate_scheduled_time(
         db, workspace_id, delay_type, delay_config, trigger_data
     )
 
-    execution = DelayedExecution(
-        workspace_id=workspace_id,
-        workflow_definition_id=workflow_definition_id,
-        execution_id=generate_execution_id(),
-        delay_type=delay_type,
-        delay_config=delay_config,
-        scheduled_at=scheduled_at,
-        window_start=window_start,
-        window_end=window_end,
-        status=DelayedExecutionStatus.scheduled,
-        context=context,
-        trigger_data=trigger_data,
-        idempotency_key=idempotency_key,
-        max_retries=max_retries,
-    )
+    # Atomic upsert using INSERT ... ON CONFLICT
+    values = {
+        "workspace_id": workspace_id,
+        "workflow_definition_id": workflow_definition_id,
+        "execution_id": generate_execution_id(),
+        "delay_type": delay_type,
+        "delay_config": delay_config,
+        "scheduled_at": scheduled_at,
+        "window_start": window_start,
+        "window_end": window_end,
+        "status": DelayedExecutionStatus.scheduled,
+        "context": context,
+        "trigger_data": trigger_data,
+        "idempotency_key": idempotency_key,
+        "max_retries": max_retries,
+    }
 
-    db.add(execution)
-    await db.commit()
-    await db.refresh(execution)
-    return execution
+    stmt = insert(DelayedExecution).values(**values).on_conflict_do_nothing(
+        index_elements=["idempotency_key"]
+    ).returning(DelayedExecution)
+
+    result = await db.execute(stmt)
+    execution = result.scalar_one_or_none()
+
+    if execution is not None:
+        await db.commit()
+        return execution, True
+
+    # Conflict occurred - fetch existing execution
+    existing = await db.execute(
+        select(DelayedExecution).where(
+            DelayedExecution.idempotency_key == idempotency_key
+        )
+    )
+    existing_exec = existing.scalar_one_or_none()
+    if existing_exec:
+        await db.rollback()
+        return existing_exec, False
+
+    # Should not reach here, but handle gracefully
+    raise ValueError("Failed to create delayed execution")
 
 
 async def get_delayed_execution(
