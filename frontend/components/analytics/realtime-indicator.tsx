@@ -11,10 +11,10 @@ export function RealtimeIndicator({ status, lastEventAt }: RealtimeIndicatorProp
         status === "connected"
             ? "bg-emerald-500"
             : status === "reconnecting"
-            ? "bg-yellow-500"
-            : status === "connecting"
-            ? "bg-blue-500"
-            : "bg-red-500";
+                ? "bg-yellow-500"
+                : status === "connecting"
+                    ? "bg-blue-500"
+                    : "bg-red-500";
 
     return (
         <div className="flex items-center gap-2 text-xs text-gray-500">

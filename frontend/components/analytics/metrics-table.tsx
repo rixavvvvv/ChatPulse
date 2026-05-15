@@ -35,7 +35,7 @@ export function MetricsTable<T>({ columns, data, emptyText = "No data" }: Metric
                         </tr>
                     )}
                     {data.map((row, idx) => (
-                        <tr key={idx} className={cn("border-t border-gray-200 dark:border-gray-800")}> 
+                        <tr key={idx} className={cn("border-t border-gray-200 dark:border-gray-800")}>
                             {columns.map((col) => (
                                 <td key={col.key} className="px-4 py-3">
                                     {col.render ? col.render(row) : (row as any)[col.key]}
