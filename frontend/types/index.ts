@@ -208,6 +208,167 @@ export interface WorkflowNode {
     position: { x: number; y: number };
 }
 
+export type WorkflowNodeType =
+    | "trigger"
+    | "condition"
+    | "delay"
+    | "send_message"
+    | "add_tag"
+    | "remove_tag"
+    | "branch"
+    | "webhook_call";
+
+export interface WorkflowNodeConfig {
+    name: string;
+    config: Record<string, unknown>;
+}
+
+export interface WorkflowDefinitionNode {
+    node_id: string;
+    node_type: WorkflowNodeType;
+    name: string;
+    config: Record<string, unknown>;
+    position: { x: number; y: number };
+}
+
+export interface WorkflowDefinitionEdge {
+    edge_id: string;
+    source_node_id: string;
+    target_node_id: string;
+    condition?: string | null;
+}
+
+export type WorkflowStatus = "draft" | "published" | "archived";
+export type WorkflowExecutionStatus =
+    | "pending"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "paused";
+
+export interface WorkflowDefinitionResponse {
+    id: number;
+    workspace_id: number;
+    name: string;
+    description?: string | null;
+    status: WorkflowStatus;
+    version: number;
+    created_by: number;
+    created_at: string;
+    updated_at: string;
+    nodes: WorkflowDefinitionNode[];
+    edges: WorkflowDefinitionEdge[];
+}
+
+export interface WorkflowExecutionResponse {
+    id: number;
+    workspace_id: number;
+    workflow_definition_id: number;
+    execution_id: string;
+    status: WorkflowExecutionStatus;
+    trigger_data: Record<string, unknown>;
+    context: Record<string, unknown>;
+    current_node_id?: string | null;
+    started_at?: string | null;
+    completed_at?: string | null;
+    error?: string | null;
+    created_at: string;
+}
+
+export interface NodeExecutionResponse {
+    id: number;
+    node_id: string;
+    node_type: string;
+    status: WorkflowExecutionStatus;
+    input_data?: Record<string, unknown>;
+    output_data?: Record<string, unknown>;
+    error?: string | null;
+    started_at?: string | null;
+    completed_at?: string | null;
+}
+
+export interface WorkflowExecutionDetailResponse extends WorkflowExecutionResponse {
+    node_executions: NodeExecutionResponse[];
+}
+
+export interface WorkflowValidationError {
+    error_type: string;
+    message: string;
+    node_ids: string[];
+    details?: Record<string, unknown>;
+}
+
+export interface DashboardOverview {
+    workspace_id: number;
+    period: string;
+    messages_sent_today: number;
+    messages_sent_yesterday: number;
+    campaigns_active: number;
+    campaigns_completed_today: number;
+    delivery_rate: number;
+    avg_dispatch_time_ms: number;
+    queue_depth: number;
+    error_rate: number;
+}
+
+export interface RealtimeDashboardMetrics {
+    workspace_id: number;
+    active_campaigns: number;
+    messages_in_flight: number;
+    queue_depth: number;
+    active_workers: number;
+    messages_last_minute: number;
+    messages_last_hour: number;
+    messages_per_second?: number | null;
+    avg_queue_latency_ms?: number | null;
+    avg_dispatch_latency_ms?: number | null;
+    p95_dispatch_latency_ms?: number | null;
+    error_rate_percent?: number | null;
+    updated_at: string;
+}
+
+export interface CampaignDeliveryResponse {
+    summary: Record<string, unknown>;
+    timeline: Array<Record<string, unknown>>;
+    error_breakdown: Record<string, number>;
+}
+
+export interface QueueHealthResponse {
+    summary: Record<string, unknown>;
+    timeline: Array<Record<string, unknown>>;
+    by_worker: Record<string, number>;
+}
+
+export interface WebhookHealthResponse {
+    summary: Record<string, unknown>;
+    timeline: Array<Record<string, unknown>>;
+    recent_failures: Array<Record<string, unknown>>;
+    by_source: Record<string, number>;
+}
+
+export interface RetryAnalyticsResponse {
+    summary: Record<string, unknown>;
+    timeline: Array<Record<string, unknown>>;
+    by_error_type: Record<string, number>;
+}
+
+export interface RecoveryAnalyticsResponse {
+    summary: Record<string, unknown>;
+    timeline: Array<Record<string, unknown>>;
+    recent_recoveries: Array<Record<string, unknown>>;
+}
+
+export interface DashboardAlert {
+    id: string;
+    severity: "info" | "warning" | "critical";
+    message: string;
+    metric_name?: string;
+    current_value?: number;
+    threshold?: number;
+    created_at?: string;
+}
+
 export interface Segment {
     id: number;
     name: string;
