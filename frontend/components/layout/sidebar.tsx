@@ -15,6 +15,7 @@ import {
     Workflow,
     Cog,
     X,
+    Shield,
 } from "lucide-react";
 
 const navigationItems = [
@@ -27,6 +28,7 @@ const navigationItems = [
     { label: "Analytics", href: "/analytics", icon: BarChart3 },
     { label: "Automations", href: "/automations", icon: Zap },
     { label: "Settings", href: "/settings", icon: Cog },
+    { label: "Admin", href: "/admin", icon: Shield },
 ];
 
 export function Sidebar() {

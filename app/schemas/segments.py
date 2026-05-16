@@ -8,6 +8,11 @@ class SegmentCreateRequest(BaseModel):
     definition: dict = Field(default_factory=dict)
 
 
+class SegmentUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    definition: dict | None = Field(default=None)
+
+
 class SegmentPreviewRequest(BaseModel):
     definition: dict = Field(default_factory=dict)
 

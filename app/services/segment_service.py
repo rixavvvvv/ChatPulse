@@ -40,6 +40,35 @@ async def get_segment(session: AsyncSession, *, workspace_id: int, segment_id: i
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def update_segment(
+    session: AsyncSession,
+    *,
+    workspace_id: int,
+    segment_id: int,
+    name: str | None = None,
+    definition: dict[str, Any] | None = None,
+) -> Segment:
+    segment = await get_segment(session=session, workspace_id=workspace_id, segment_id=segment_id)
+    if not segment:
+        raise ValueError("Segment not found")
+
+    if name is not None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValueError("Segment name is required")
+        segment.name = normalized_name
+
+    if definition is not None:
+        # Validate the definition compiles
+        compiled = compile_to_where_clause(workspace_id=workspace_id, definition=definition)
+        _ = compiled
+        segment.definition = definition
+
+    await session.commit()
+    await session.refresh(segment)
+    return segment
+
+
 async def preview_segment_count(
     session: AsyncSession,
     *,

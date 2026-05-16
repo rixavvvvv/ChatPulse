@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
     Plus, X, ChevronDown, ChevronRight, Save, Trash2, Loader2, Users,
-    Copy, Edit3, Database, Tag, Clock, Activity, ChevronDown as DropdownIcon
+    Copy, Edit3, Database, Tag, Clock, Activity, ChevronDown as DropdownIcon, AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -138,6 +138,8 @@ export function SegmentBuilder({
     const [root, setRoot] = useState<SegmentNode>(definition || createGroup());
     const [previewCount, setPreviewCount] = useState<number | null>(null);
     const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+    const [previewError, setPreviewError] = useState<string | null>(null);
+    const [saveError, setSaveError] = useState<string | null>(null);
     const [showSaveDialog, setShowSaveDialog] = useState(false);
     const [segmentName, setSegmentName] = useState("");
     const [isSaving, setIsSaving] = useState(false);
@@ -167,11 +169,13 @@ export function SegmentBuilder({
     const handlePreview = useCallback(async () => {
         if (!onPreview) return;
         setIsLoadingPreview(true);
+        setPreviewError(null);
         try {
             const count = await onPreview(root);
             setPreviewCount(count);
-        } catch {
+        } catch (err) {
             setPreviewCount(null);
+            setPreviewError(err instanceof Error ? err.message : "Failed to preview segment");
         } finally {
             setIsLoadingPreview(false);
         }
@@ -245,6 +249,8 @@ export function SegmentBuilder({
         setRoot(newRoot);
         onChange?.(newRoot);
         setPreviewCount(null);
+        setPreviewError(null);
+        setSaveError(null);
         setSegmentName("");
     }, [onChange]);
 
@@ -501,25 +507,44 @@ export function SegmentBuilder({
                     {renderGroup(root, handleRootUpdate, 0, true)}
 
                     <div className="flex items-center justify-between pt-4 border-t">
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handlePreview}
-                            disabled={isLoadingPreview}
-                        >
-                            {isLoadingPreview ? (
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : (
-                                <Users className="h-4 w-4 mr-2" />
+                        <div className="flex items-center gap-2">
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={handlePreview}
+                                disabled={isLoadingPreview}
+                            >
+                                {isLoadingPreview ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                    <Users className="h-4 w-4 mr-2" />
+                                )}
+                                Preview Audience
+                            </Button>
+                            {previewError && (
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={handlePreview}
+                                    className="text-red-500"
+                                >
+                                    Retry
+                                </Button>
                             )}
-                            Preview Audience
-                        </Button>
+                        </div>
                         {previewCount !== null && (
                             <Badge variant="secondary" className="text-sm px-3 py-1">
                                 {previewCount.toLocaleString()} contact{previewCount !== 1 ? "s" : ""}
                             </Badge>
                         )}
                     </div>
+
+                    {previewError && (
+                        <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                            <AlertTriangle className="h-4 w-4" />
+                            {previewError}
+                        </div>
+                    )}
                 </div>
             )}
 

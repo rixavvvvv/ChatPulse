@@ -1,0 +1,1 @@
+# Bootstrap module for ChatPulse local development

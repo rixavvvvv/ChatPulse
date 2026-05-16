@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Plus, Upload, AlertCircle, X, Filter, Users, History, Database, Layers, RefreshCw } from "lucide-react";
+import { Plus, Upload, AlertCircle, X, Filter, Users, History, Database, Layers, RefreshCw, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,12 @@ import {
     useSegments,
     usePreviewSegmentCount,
     useCreateSegment,
+    useUpdateSegment,
     useDeleteSegment,
     useMaterializeSegment,
 } from "@/hooks/use-contacts";
 import type { Contact, ContactCreateRequest, FilterNode, SegmentNode } from "@/lib/types/contact";
+import { transformSegmentToBackend, validateSegmentForBackend, isSegmentEmpty } from "@/lib/segment-transformer";
 
 export default function ContactsPage() {
     const [showAddForm, setShowAddForm] = useState(false);
@@ -48,6 +50,7 @@ export default function ContactsPage() {
     const { data: savedFilters = [] } = useSegments();
     const previewMutation = usePreviewSegmentCount();
     const createSegmentMutation = useCreateSegment();
+    const updateSegmentMutation = useUpdateSegment();
     const deleteSegmentMutation = useDeleteSegment();
     const materializeMutation = useMaterializeSegment();
 
@@ -128,28 +131,74 @@ export default function ContactsPage() {
     }, []);
 
     const handlePreviewSegment = useCallback(async (definition: SegmentNode): Promise<number> => {
+        // Validate segment first
+        const validationErrors = validateSegmentForBackend(definition);
+        if (validationErrors.length > 0) {
+            toast.error(validationErrors[0]);
+            return 0;
+        }
+
+        // Transform to backend format
+        const backendDefinition = transformSegmentToBackend(definition);
+        if (!backendDefinition) {
+            toast.error("Invalid segment definition");
+            return 0;
+        }
+
         try {
-            const count = await previewMutation.mutateAsync(definition as unknown as Record<string, unknown>);
+            const count = await previewMutation.mutateAsync(backendDefinition as unknown as Record<string, unknown>);
             return count;
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Failed to preview segment");
+            const message = err instanceof Error ? err.message : "Failed to preview segment";
+            toast.error(message);
             return 0;
         }
     }, [previewMutation]);
 
     const handleSaveSegment = useCallback(async (segmentName: string, definition: SegmentNode) => {
+        // Check if segment is empty
+        if (isSegmentEmpty(definition)) {
+            toast.error("Segment must have at least one condition");
+            return;
+        }
+
+        // Validate segment first
+        const validationErrors = validateSegmentForBackend(definition);
+        if (validationErrors.length > 0) {
+            toast.error(validationErrors[0]);
+            return;
+        }
+
+        // Transform to backend format
+        const backendDefinition = transformSegmentToBackend(definition);
+        if (!backendDefinition) {
+            toast.error("Invalid segment definition");
+            return;
+        }
+
         try {
-            await createSegmentMutation.mutateAsync({
-                name: segmentName,
-                definition: definition as unknown as Record<string, unknown>,
-            });
-            toast.success(`Segment "${segmentName}" created`);
+            if (editingSegmentId) {
+                await updateSegmentMutation.mutateAsync({
+                    id: editingSegmentId,
+                    name: segmentName,
+                    definition: backendDefinition as unknown as Record<string, unknown>,
+                });
+                toast.success(`Segment "${segmentName}" updated`);
+            } else {
+                await createSegmentMutation.mutateAsync({
+                    name: segmentName,
+                    definition: backendDefinition as unknown as Record<string, unknown>,
+                });
+                toast.success(`Segment "${segmentName}" created`);
+            }
             setShowSegmentBuilder(false);
             setSegmentDefinition(undefined);
+            setEditingSegmentId(null);
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Failed to save segment");
+            const message = err instanceof Error ? err.message : "Failed to save segment";
+            toast.error(message);
         }
-    }, [createSegmentMutation]);
+    }, [createSegmentMutation, updateSegmentMutation, editingSegmentId]);
 
     const handleEditSegment = useCallback((segmentId: number) => {
         const segment = savedFilters.find(s => s.id === segmentId);

@@ -20,6 +20,7 @@ import {
     previewSegmentCount,
     listSegments,
     createSegment,
+    updateSegment,
     deleteSegment,
 } from "@/lib/services/contacts";
 import type {
@@ -213,6 +214,18 @@ export function useCreateSegment() {
     return useMutation({
         mutationFn: ({ name, definition }: { name: string; definition: Record<string, unknown> }) =>
             createSegment(name, definition),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: CONTACT_QUERY_KEYS.segments });
+        },
+    });
+}
+
+export function useUpdateSegment() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: ({ id, name, definition }: { id: number; name: string; definition: Record<string, unknown> }) =>
+            updateSegment(id, name, definition),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: CONTACT_QUERY_KEYS.segments });
         },

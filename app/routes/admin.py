@@ -35,6 +35,7 @@ from app.services.subscription_service import (
     upsert_user_subscription,
 )
 from app.services.webhook_ingestion_service import replay_webhook_ingestions
+from app.services.system_health_service import get_system_health_summary
 from app.services.user_service import (
     create_user,
     get_user_by_email,
@@ -354,3 +355,12 @@ async def replay_webhook_ingestions_admin(
             )
         )
     return WebhookIngestionReplayResponse(results=items)
+
+
+@router.get("/system-health")
+async def get_system_health(
+    session: AsyncSession = Depends(get_db_session),
+    _super_admin: User = Depends(require_super_admin),
+) -> dict:
+    """Get system health summary including Redis, PostgreSQL, Celery, WebSocket, queues."""
+    return await get_system_health_summary(session)

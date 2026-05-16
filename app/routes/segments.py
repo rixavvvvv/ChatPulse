@@ -10,12 +10,14 @@ from app.schemas.segments import (
     SegmentPreviewRequest,
     SegmentPreviewResponse,
     SegmentResponse,
+    SegmentUpdateRequest,
 )
 from app.services.segment_service import (
     create_segment,
     get_segment,
     list_segments,
     preview_segment_count,
+    update_segment,
 )
 
 router = APIRouter(prefix="/segments", tags=["Segments"])
@@ -79,4 +81,24 @@ async def materialize_segment(
 
     async_result = process_segment_materialize_task.delay(workspace.id, segment_id)
     return SegmentMaterializeResponse(segment_id=segment_id, celery_task_id=async_result.id)
+
+
+@router.put("/{segment_id}", response_model=SegmentResponse)
+async def update_segment_endpoint(
+    segment_id: int,
+    payload: SegmentUpdateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(require_workspace_admin),
+) -> SegmentResponse:
+    try:
+        row = await update_segment(
+            session=session,
+            workspace_id=workspace.id,
+            segment_id=segment_id,
+            name=payload.name,
+            definition=payload.definition,
+        )
+        return SegmentResponse.model_validate(row)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

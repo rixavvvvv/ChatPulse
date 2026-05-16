@@ -3,6 +3,7 @@ import { Manrope, Space_Grotesk } from "next/font/google";
 
 import "./globals.css";
 import { RootProvider } from "@/providers/root-provider";
+import { WebSocketDebugPanel } from "@/components/websocket/debug-panel";
 
 const manrope = Manrope({
     subsets: ["latin"],
@@ -29,6 +30,7 @@ export default function RootLayout({
             <body className={`${manrope.variable} ${spaceGrotesk.variable} font-[var(--font-manrope)]`}>
                 <RootProvider>
                     {children}
+                    <WebSocketDebugPanel />
                 </RootProvider>
             </body>
         </html>

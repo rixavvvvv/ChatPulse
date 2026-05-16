@@ -280,6 +280,34 @@ export async function createSegment(
     );
 }
 
+export async function updateSegment(
+    segmentId: number,
+    name: string,
+    definition: Record<string, unknown>
+): Promise<{
+    id: number;
+    name: string;
+    status: string;
+    definition: Record<string, unknown>;
+    approx_size: number;
+}> {
+    const token = await getAuthHeaders();
+    return apiRequest<{
+        id: number;
+        name: string;
+        status: string;
+        definition: Record<string, unknown>;
+        approx_size: number;
+    }>(
+        `/segments/${segmentId}`,
+        {
+            method: "PUT",
+            body: JSON.stringify({ name, definition }),
+        },
+        token
+    );
+}
+
 export async function deleteSegment(segmentId: number): Promise<void> {
     const token = await getAuthHeaders();
     await apiRequest<void>(
