@@ -92,7 +92,8 @@ async def get_workspace_meta_credentials(
             phone_number_id=record.phone_number_id,
             access_token=decrypt_secret(record.access_token),
             business_account_id=record.business_account_id,
-            app_secret=(decrypt_secret(record.app_secret) if record.app_secret else None),
+            app_secret=(decrypt_secret(record.app_secret)
+                        if record.app_secret else None),
             webhook_verify_token=(
                 decrypt_secret(record.webhook_verify_token)
                 if record.webhook_verify_token
@@ -105,7 +106,8 @@ async def get_workspace_meta_credential_flags(
     session: AsyncSession,
     workspace_id: int,
 ) -> dict[str, bool | str | None]:
-    stmt = select(MetaCredential).where(MetaCredential.workspace_id == workspace_id)
+    stmt = select(MetaCredential).where(
+        MetaCredential.workspace_id == workspace_id)
     record = (await session.execute(stmt)).scalar_one_or_none()
     if not record:
         return {
@@ -131,7 +133,8 @@ async def clear_workspace_meta_credentials(
     session: AsyncSession,
     workspace_id: int,
 ) -> None:
-    stmt = select(MetaCredential).where(MetaCredential.workspace_id == workspace_id)
+    stmt = select(MetaCredential).where(
+        MetaCredential.workspace_id == workspace_id)
     record = (await session.execute(stmt)).scalar_one_or_none()
     if not record:
         return

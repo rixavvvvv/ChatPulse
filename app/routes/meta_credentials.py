@@ -145,10 +145,12 @@ async def get_meta_connection(
             waba_info = MetaWabaInfo(
                 id=str(waba_payload.get("id") or ""),
                 name=waba_payload.get("name"),
-                account_review_status=waba_payload.get("account_review_status"),
+                account_review_status=waba_payload.get(
+                    "account_review_status"),
                 health_status=waba_payload.get("health_status"),
                 ownership_type=waba_payload.get("ownership_type"),
-                message_template_namespace=waba_payload.get("message_template_namespace"),
+                message_template_namespace=waba_payload.get(
+                    "message_template_namespace"),
             )
         except Exception as exc:
             reasons.append(str(exc))
@@ -170,7 +172,8 @@ async def get_meta_connection(
                         verified_name=item.get("verified_name"),
                         quality_rating=item.get("quality_rating"),
                         status=item.get("status"),
-                        code_verification_status=item.get("code_verification_status"),
+                        code_verification_status=item.get(
+                            "code_verification_status"),
                         platform_type=item.get("platform_type"),
                         throughput=item.get("throughput"),
                     )
@@ -439,6 +442,8 @@ async def sync_meta_templates(
             "updated": int(result.get("updated", 0)),
         }
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))

@@ -6,7 +6,8 @@ class MetaConnectRequest(BaseModel):
     access_token: str = Field(min_length=1, max_length=4096)
     business_account_id: str = Field(min_length=1, max_length=64)
     app_secret: str | None = Field(default=None, min_length=1, max_length=256)
-    webhook_verify_token: str | None = Field(default=None, min_length=1, max_length=256)
+    webhook_verify_token: str | None = Field(
+        default=None, min_length=1, max_length=256)
 
 
 class MetaStatusResponse(BaseModel):

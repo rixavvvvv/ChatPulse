@@ -115,7 +115,7 @@ export async function subscribeWebhook(): Promise<void> {
     await apiRequest("/meta/subscribe-webhook", { method: "POST" }, token);
 }
 
-export async function testWebhookVerifyToken(verify_token: string): Promise<{ ok: boolean; reason?: string }>{
+export async function testWebhookVerifyToken(verify_token: string): Promise<{ ok: boolean; reason?: string }> {
     const token = requireToken();
     return apiRequest<{ ok: boolean; reason?: string }>(
         "/meta/webhook-test",
@@ -127,7 +127,7 @@ export async function testWebhookVerifyToken(verify_token: string): Promise<{ ok
     );
 }
 
-export async function syncMetaTemplates(): Promise<{ created: number; updated: number }>{
+export async function syncMetaTemplates(): Promise<{ created: number; updated: number }> {
     const token = requireToken();
     return apiRequest<{ created: number; updated: number }>(
         "/meta/sync-templates",

@@ -22,7 +22,7 @@ def meta_signature_valid_with_secret(
     candidate = signature_header.strip()
     prefix = "sha256="
     if candidate.lower().startswith(prefix):
-        candidate = candidate[len(prefix) :]
+        candidate = candidate[len(prefix):]
     if not candidate:
         return False
     computed = hmac.new(
