@@ -16,6 +16,7 @@ import {
     Cog,
     X,
     Shield,
+    MessageCircle,
 } from "lucide-react";
 
 const navigationItems = [
@@ -26,6 +27,7 @@ const navigationItems = [
     { label: "Segments", href: "/segments", icon: Zap },
     { label: "Workflows", href: "/workflows", icon: Workflow },
     { label: "Analytics", href: "/analytics", icon: BarChart3 },
+    { label: "WhatsApp", href: "/integrations/meta", icon: MessageCircle },
     { label: "Automations", href: "/automations", icon: Zap },
     { label: "Settings", href: "/settings", icon: Cog },
     { label: "Admin", href: "/admin", icon: Shield },

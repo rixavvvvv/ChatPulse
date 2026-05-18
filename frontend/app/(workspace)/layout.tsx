@@ -1,9 +1,10 @@
 "use client";
 
 import { AppLayout } from "@/components/layout/app-layout";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth";
+import { getSession } from "@/lib/session";
 
 export default function WorkspaceLayout({
     children,
@@ -11,15 +12,21 @@ export default function WorkspaceLayout({
     children: React.ReactNode;
 }>) {
     const router = useRouter();
-    const { isAuthenticated } = useAuthStore();
+    const { isAuthenticated, setAuthenticated } = useAuthStore();
+    const [ready, setReady] = useState(false);
 
     useEffect(() => {
-        if (!isAuthenticated) {
+        const session = getSession();
+        if (session) {
+            setAuthenticated(true);
+        } else {
+            setAuthenticated(false);
             router.push("/login");
         }
-    }, [isAuthenticated, router]);
+        setReady(true);
+    }, [router, setAuthenticated]);
 
-    if (!isAuthenticated) {
+    if (!ready || !isAuthenticated) {
         return null;
     }
 

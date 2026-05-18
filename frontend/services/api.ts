@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { clearSession, getSession } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -13,9 +14,9 @@ export const apiClient: AxiosInstance = axios.create({
 // Add request interceptor to include auth token
 apiClient.interceptors.request.use(
     (config) => {
-        const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
+        const session = getSession();
+        if (session?.access_token) {
+            config.headers.Authorization = `Bearer ${session.access_token}`;
         }
         return config;
     },
@@ -28,7 +29,7 @@ apiClient.interceptors.response.use(
     (error) => {
         if (error.response?.status === 401) {
             // Token expired, clear and redirect to login
-            localStorage.removeItem("token");
+            clearSession();
             window.location.href = "/login";
         }
         return Promise.reject(error);

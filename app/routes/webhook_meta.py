@@ -6,9 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.db import get_db_session
 from app.services.webhook_accept_service import accept_meta_whatsapp_webhook
+from app.services.meta_credential_service import (
+    list_all_app_secrets,
+    list_all_webhook_verify_tokens,
+)
 from app.services.webhook_verification import (
     meta_challenge_response,
     meta_signature_valid,
+    meta_signature_valid_with_secret,
     parse_json_object,
 )
 from app.queue.rate_limit import (
@@ -26,18 +31,43 @@ async def verify_meta_webhook(
     hub_verify_token: str | None = Query(
         default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
+    session: AsyncSession = Depends(get_db_session),
 ) -> PlainTextResponse:
     challenge = meta_challenge_response(
         hub_mode=hub_mode,
         hub_verify_token=hub_verify_token,
         hub_challenge=hub_challenge,
     )
-    if challenge is None:
+    if challenge is not None:
+        return PlainTextResponse(content=challenge, status_code=status.HTTP_200_OK)
+
+    if settings.meta_webhook_verify_token:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Meta webhook verification failed",
         )
-    return PlainTextResponse(content=challenge, status_code=status.HTTP_200_OK)
+
+    tokens = await list_all_webhook_verify_tokens(session)
+    if not tokens:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Meta webhook verification failed",
+        )
+
+    candidate = (hub_verify_token or "").strip()
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Meta webhook verification failed",
+        )
+
+    if any(candidate == token for token in tokens):
+        return PlainTextResponse(content=hub_challenge or "", status_code=status.HTTP_200_OK)
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Meta webhook verification failed",
+    )
 
 
 @router.get("/webhook/meta/config")
@@ -87,6 +117,28 @@ async def _handle_meta_webhook_post(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature",
             )
+    else:
+        secrets = await list_all_app_secrets(session)
+        if secrets:
+            signature = request.headers.get(
+                "X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
+            if not signature:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Missing X-Hub-Signature-256 header",
+                )
+            if not any(
+                meta_signature_valid_with_secret(
+                    raw_body=raw_body,
+                    signature_header=signature,
+                    secret=secret,
+                )
+                for secret in secrets
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid webhook signature",
+                )
 
     try:
         payload = parse_json_object(raw_body)

@@ -22,6 +22,10 @@ import {
     createSegment,
     updateSegment,
     deleteSegment,
+    listContactImportJobs,
+    getContactImportJob,
+    getContactImportErrors,
+    createContactImportJob,
 } from "@/lib/services/contacts";
 import type {
     Contact,

@@ -191,11 +191,6 @@ const DropdownMenuShortcut = ({
 };
 DropdownMenuShortcut.displayName = "DropdownMenuShortcut";
 
-const DropdownMenuGroup = DropdownMenuGroup;
-const DropdownMenuPortal = DropdownMenuPortal;
-const DropdownMenuSub = DropdownMenuSub;
-const DropdownMenuRadioGroup = DropdownMenuRadioGroup;
-
 export {
     DropdownMenu,
     DropdownMenuTrigger,

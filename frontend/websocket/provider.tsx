@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { useAuthStore } from "@/stores/auth";
+import { getSession, onSessionUpdated } from "@/lib/session";
 
 interface WebSocketContextType {
     socket: Socket | null;
@@ -18,12 +18,18 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     const [isConnected, setIsConnected] = useState(false);
     const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
     const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
-    const { user } = useAuthStore();
+    const [token, setToken] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!user?.id) return;
+        const load = () => {
+            const session = getSession();
+            setToken(session?.access_token ?? null);
+        };
+        load();
+        return onSessionUpdated(load);
+    }, []);
 
-        const token = localStorage.getItem("token");
+    useEffect(() => {
         if (!token) return;
 
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:8000";
@@ -72,7 +78,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         return () => {
             newSocket.disconnect();
         };
-    }, [user?.id]);
+    }, [token]);
 
     return (
         <WebSocketContext.Provider

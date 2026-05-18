@@ -24,10 +24,26 @@ class MetaCredential(Base):
         nullable=False,
         info={"sensitive": True},
     )
+    app_secret: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        info={"sensitive": True},
+    )
+    webhook_verify_token: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        info={"sensitive": True},
+    )
     business_account_id: Mapped[str] = mapped_column(
         String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )

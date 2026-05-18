@@ -1,6 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/api";
+import { getSession } from "@/lib/session";
 
 interface RedisHealth {
     status: string;
@@ -77,14 +79,13 @@ export interface SystemHealth {
     workflow_failures: WorkflowFailures;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
-
 async function fetchSystemHealth(): Promise<SystemHealth> {
-    const response = await fetch(`${API_URL}/admin/system-health`);
-    if (!response.ok) {
-        throw new Error("Failed to fetch system health");
+    const session = getSession();
+    const token = session?.access_token;
+    if (!token) {
+        throw new Error("Missing access token");
     }
-    return response.json();
+    return apiRequest<SystemHealth>("/admin/system-health", {}, token);
 }
 
 export function useSystemHealth(enabled = true) {

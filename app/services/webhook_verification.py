@@ -10,8 +10,12 @@ from app.core.config import get_settings
 settings = get_settings()
 
 
-def meta_signature_valid(raw_body: bytes, signature_header: str | None) -> bool:
-    if not settings.meta_app_secret:
+def meta_signature_valid_with_secret(
+    raw_body: bytes,
+    signature_header: str | None,
+    secret: str | None,
+) -> bool:
+    if not secret:
         return True
     if not signature_header or not signature_header.strip():
         return False
@@ -22,11 +26,19 @@ def meta_signature_valid(raw_body: bytes, signature_header: str | None) -> bool:
     if not candidate:
         return False
     computed = hmac.new(
-        key=settings.meta_app_secret.encode("utf-8"),
+        key=secret.encode("utf-8"),
         msg=raw_body,
         digestmod=hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(computed, candidate)
+
+
+def meta_signature_valid(raw_body: bytes, signature_header: str | None) -> bool:
+    return meta_signature_valid_with_secret(
+        raw_body=raw_body,
+        signature_header=signature_header,
+        secret=settings.meta_app_secret,
+    )
 
 
 def meta_challenge_response(

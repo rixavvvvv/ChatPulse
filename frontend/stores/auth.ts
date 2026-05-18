@@ -9,6 +9,7 @@ interface AuthStore {
     setUser: (user: User | null) => void;
     setWorkspace: (workspace: Workspace | null) => void;
     setIsLoading: (loading: boolean) => void;
+    setAuthenticated: (authenticated: boolean) => void;
     logout: () => void;
 }
 
@@ -21,6 +22,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
         set({ user, isAuthenticated: user !== null }),
     setWorkspace: (workspace) => set({ workspace }),
     setIsLoading: (loading) => set({ isLoading: loading }),
+    setAuthenticated: (authenticated) => set({ isAuthenticated: authenticated }),
     logout: () =>
         set({
             user: null,

@@ -135,3 +135,18 @@ async def init_db() -> None:
                 "ALTER TABLE webhook_ingestions ADD COLUMN IF NOT EXISTS provider_signature TEXT"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE meta_credentials ADD COLUMN IF NOT EXISTS app_secret TEXT"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE meta_credentials ADD COLUMN IF NOT EXISTS webhook_verify_token TEXT"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE meta_credentials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+            )
+        )

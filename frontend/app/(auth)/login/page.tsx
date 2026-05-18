@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/api";
 import { saveSession } from "@/lib/session";
+import { useAuthStore } from "@/stores/auth";
 
 type LoginResponse = {
     access_token: string;
@@ -19,6 +20,7 @@ type LoginResponse = {
 
 export default function LoginPage() {
     const router = useRouter();
+    const { setAuthenticated } = useAuthStore();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
@@ -43,6 +45,8 @@ export default function LoginPage() {
                 workspace_id: payload.workspace_id,
                 role: payload.role,
             });
+
+            setAuthenticated(true);
 
             router.push("/dashboard");
         } catch (err) {

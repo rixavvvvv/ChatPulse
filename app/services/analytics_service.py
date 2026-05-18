@@ -1,4 +1,20 @@
 from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Any, AsyncGenerator
+
+from sqlalchemy import and_, func, select, text, update
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSession as AsyncSessionAlt
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.db import get_db_session
 from app.models.analytics import (
     AnalyticsEvent,
     AnalyticsRollup,
@@ -11,24 +27,6 @@ from app.models.analytics import (
     create_event_id,
     get_aggregation_key,
 )
-from app.db import get_db_session
-from app.core.config import get_settings
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession as AsyncSessionAlt
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import and_, func, select, text, update
-from typing import Any, AsyncGenerator
-from datetime import datetime, timedelta, timezone
-from contextlib import asynccontextmanager
-import time
-import logging
-import json
-import asyncio
-
-from datetime import UTC, datetime, timedelta
-
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.message_event import MessageEvent, MessageEventStatus
 from app.models.message_tracking import MessageTracking, MessageTrackingStatus
