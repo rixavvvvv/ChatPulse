@@ -1,4 +1,29 @@
 from __future__ import annotations
+from app.models.analytics import (
+    AnalyticsEvent,
+    AnalyticsRollup,
+    CampaignMetrics,
+    EventCategory,
+    EventType,
+    RealtimeMetrics,
+    RollupGranularity,
+    WorkspaceMetrics,
+    create_event_id,
+    get_aggregation_key,
+)
+from app.db import get_db_session
+from app.core.config import get_settings
+from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession as AsyncSessionAlt
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import and_, func, select, text, update
+from typing import Any, AsyncGenerator
+from datetime import datetime, timedelta, timezone
+from contextlib import asynccontextmanager
+import time
+import logging
+import json
+import asyncio
 
 from datetime import UTC, datetime, timedelta
 
@@ -66,7 +91,8 @@ async def get_workspace_message_timeline(
     days: int = 14,
 ) -> WorkspaceMessageTimelineResponse:
     window_days = min(max(days, 1), 90)
-    start_date = (datetime.now(tz=UTC) - timedelta(days=window_days - 1)).date()
+    start_date = (datetime.now(tz=UTC) -
+                  timedelta(days=window_days - 1)).date()
 
     stmt = (
         select(
@@ -131,33 +157,6 @@ Provides:
 - Real-time metrics
 """
 
-import asyncio
-import json
-import logging
-import time
-from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncGenerator
-
-from sqlalchemy import and_, func, select, text, update
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession as AsyncSessionAlt
-from sqlalchemy.orm import Session
-
-from app.core.config import get_settings
-from app.db import get_db_session
-from app.models.analytics import (
-    AnalyticsEvent,
-    AnalyticsRollup,
-    CampaignMetrics,
-    EventCategory,
-    EventType,
-    RealtimeMetrics,
-    RollupGranularity,
-    WorkspaceMetrics,
-    create_event_id,
-    get_aggregation_key,
-)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -227,7 +226,8 @@ class AnalyticsIngestionService:
         Returns:
             Created AnalyticsEvent
         """
-        event_type_str = event_type.value if isinstance(event_type, EventType) else event_type
+        event_type_str = event_type.value if isinstance(
+            event_type, EventType) else event_type
         category = self._get_category(event_type_str)
 
         event = AnalyticsEvent(
@@ -254,7 +254,8 @@ class AnalyticsIngestionService:
             error_type=error_type,
             labels=labels,
             processed=False,
-            aggregation_key=get_aggregation_key(event_type_str, workspace_id, labels, category),
+            aggregation_key=get_aggregation_key(
+                event_type_str, workspace_id, labels, category),
         )
 
         async with get_db_session() as session:
@@ -292,7 +293,8 @@ class AnalyticsIngestionService:
                     event_id=create_event_id(),
                     event_type=event_type,
                     event_category=category,
-                    occurred_at=event_dict.get("occurred_at") or datetime.now(timezone.utc),
+                    occurred_at=event_dict.get(
+                        "occurred_at") or datetime.now(timezone.utc),
                     ingested_at=datetime.now(timezone.utc),
                     workspace_id=event_dict["workspace_id"],
                     campaign_id=event_dict.get("campaign_id"),
@@ -312,7 +314,8 @@ class AnalyticsIngestionService:
                     error_type=event_dict.get("error_type"),
                     labels=event_dict.get("labels"),
                     processed=False,
-                    aggregation_key=get_aggregation_key(event_type, event_dict["workspace_id"], event_dict.get("labels"), category),
+                    aggregation_key=get_aggregation_key(
+                        event_type, event_dict["workspace_id"], event_dict.get("labels"), category),
                 )
                 session.add(event)
                 created_events.append(event)
@@ -731,7 +734,8 @@ async def get_workspace_message_timeline(
     days: int = 14,
 ) -> WorkspaceMessageTimelineResponse:
     window_days = min(max(days, 1), 90)
-    start_date = (datetime.now(tz=UTC) - timedelta(days=window_days - 1)).date()
+    start_date = (datetime.now(tz=UTC) -
+                  timedelta(days=window_days - 1)).date()
 
     stmt = (
         select(

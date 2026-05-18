@@ -97,7 +97,8 @@ class DashboardQueryService:
         if pagination is None:
             pagination = PaginationInput()
 
-        date_range = resolve_date_range(start_time, end_time, period, default_days=30)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=30)
         bucket_interval = get_bucket_interval(granularity, date_range)
 
         cache_key = CacheKey.build(
@@ -124,9 +125,11 @@ class DashboardQueryService:
             if campaign_id:
                 conditions.append(MessageTracking.campaign_id == campaign_id)
             if date_range.start_time:
-                conditions.append(MessageTracking.created_at >= date_range.start_time)
+                conditions.append(MessageTracking.created_at >=
+                                  date_range.start_time)
             if date_range.end_time:
-                conditions.append(MessageTracking.created_at <= date_range.end_time)
+                conditions.append(
+                    MessageTracking.created_at <= date_range.end_time)
 
             # Summary counts
             summary_query = select(
@@ -141,7 +144,8 @@ class DashboardQueryService:
                 func.count(
                     func.nullif(
                         MessageTracking.current_status.notin_(
-                            [MessageTrackingStatus.delivered, MessageTrackingStatus.read]
+                            [MessageTrackingStatus.delivered,
+                                MessageTrackingStatus.read]
                         ),
                         False
                     )
@@ -181,7 +185,8 @@ class DashboardQueryService:
             if include_timeline:
                 trunc_unit = granularity_to_trunc_unit(bucket_interval)
                 timeline_query = select(
-                    func.date_trunc(trunc_unit, MessageTracking.created_at).label("bucket"),
+                    func.date_trunc(
+                        trunc_unit, MessageTracking.created_at).label("bucket"),
                     MessageTracking.current_status,
                     func.count(MessageTracking.id).label("count"),
                 ).where(and_(*conditions)).group_by(
@@ -197,7 +202,8 @@ class DashboardQueryService:
                 for row in timeline_rows:
                     bucket: datetime = row.bucket
                     if bucket not in buckets:
-                        buckets[bucket] = {"timestamp": bucket, "sent": 0, "delivered": 0, "read": 0, "failed": 0}
+                        buckets[bucket] = {
+                            "timestamp": bucket, "sent": 0, "delivered": 0, "read": 0, "failed": 0}
                     status = row.current_status
                     count = int(row.count or 0)
                     if status == MessageTrackingStatus.sent:
@@ -229,13 +235,15 @@ class DashboardQueryService:
 
                 error_result = await session.execute(error_query)
                 for row in error_result:
-                    error_breakdown[row.error or "Unknown"] = int(row.count or 0)
+                    error_breakdown[row.error or "Unknown"] = int(
+                        row.count or 0)
 
             # Delivery rates
             delivery_rate = (delivered / total * 100) if total > 0 else 0.0
             read_rate = (read / total * 100) if total > 0 else 0.0
             failure_rate = (failed / total * 100) if total > 0 else 0.0
-            avg_delivery_time = (float(row.total_delivery_time) / delivered) if delivered > 0 else None
+            avg_delivery_time = (
+                float(row.total_delivery_time) / delivered) if delivered > 0 else None
 
             response = {
                 "summary": {
@@ -282,7 +290,8 @@ class DashboardQueryService:
         if pagination is None:
             pagination = PaginationInput()
 
-        date_range = resolve_date_range(start_time, end_time, period, default_days=30)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=30)
 
         cache_key = CacheKey.build(
             "campaign_delivery_list",
@@ -388,7 +397,8 @@ class DashboardQueryService:
 
         Includes message counts, campaign stats, contact metrics.
         """
-        date_range = resolve_date_range(start_time, end_time, period, default_days=30)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=30)
         bucket_interval = get_bucket_interval(granularity, date_range)
 
         cache_key = CacheKey.build(
@@ -420,7 +430,8 @@ class DashboardQueryService:
                 func.count(
                     func.nullif(
                         MessageTracking.current_status.in_(
-                            [MessageTrackingStatus.delivered, MessageTrackingStatus.read]
+                            [MessageTrackingStatus.delivered,
+                                MessageTrackingStatus.read]
                         ),
                         False
                     )
@@ -455,13 +466,16 @@ class DashboardQueryService:
             camp_query = select(
                 func.count(Campaign.id).label("created"),
                 func.count(
-                    func.nullif(Campaign.status == CampaignStatus.completed, False)
+                    func.nullif(Campaign.status ==
+                                CampaignStatus.completed, False)
                 ).label("completed"),
                 func.count(
-                    func.nullif(Campaign.status == CampaignStatus.failed, False)
+                    func.nullif(Campaign.status ==
+                                CampaignStatus.failed, False)
                 ).label("failed"),
                 func.count(
-                    func.nullif(Campaign.status == CampaignStatus.running, False)
+                    func.nullif(Campaign.status ==
+                                CampaignStatus.running, False)
                 ).label("active"),
             ).where(and_(*camp_conditions))
 
@@ -477,7 +491,8 @@ class DashboardQueryService:
             if include_timeline:
                 trunc_unit = granularity_to_trunc_unit(bucket_interval)
                 timeline_query = select(
-                    func.date_trunc(trunc_unit, MessageTracking.created_at).label("bucket"),
+                    func.date_trunc(
+                        trunc_unit, MessageTracking.created_at).label("bucket"),
                     func.count(MessageTracking.id).label("count"),
                 ).where(and_(*msg_conditions)).group_by("bucket").order_by("bucket")
 
@@ -507,7 +522,8 @@ class DashboardQueryService:
                 )
                 top_result = await session.execute(top_query)
                 for row in top_result.all():
-                    total_rec = int(row.success_count or 0) + int(row.failed_count or 0)
+                    total_rec = int(row.success_count or 0) + \
+                        int(row.failed_count or 0)
                     top_campaigns.append({
                         "campaign_id": row.id,
                         "campaign_name": row.name,
@@ -557,7 +573,8 @@ class DashboardQueryService:
         use_cache: bool = True,
     ) -> dict[str, Any]:
         """Get queue health metrics from analytics events and dead letters."""
-        date_range = resolve_date_range(start_time, end_time, period, default_days=7)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=7)
 
         cache_key = CacheKey.build(
             "queue_health",
@@ -634,7 +651,8 @@ class DashboardQueryService:
             if include_timeline:
                 trunc_unit = granularity_to_trunc_unit("1h")
                 timeline_query = select(
-                    func.date_trunc(trunc_unit, AnalyticsEvent.occurred_at).label("bucket"),
+                    func.date_trunc(
+                        trunc_unit, AnalyticsEvent.occurred_at).label("bucket"),
                     AnalyticsEvent.event_type,
                     func.count(AnalyticsEvent.id).label("count"),
                 ).where(and_(*conditions)).group_by("bucket", AnalyticsEvent.event_type).order_by("bucket")
@@ -644,9 +662,11 @@ class DashboardQueryService:
                 for row in tl_result.all():
                     bucket = row.bucket
                     if bucket not in buckets:
-                        buckets[bucket] = {"timestamp": bucket, "queue_depth": 0, "tasks_completed": 0, "tasks_failed": 0, "active_workers": 0}
+                        buckets[bucket] = {"timestamp": bucket, "queue_depth": 0,
+                                           "tasks_completed": 0, "tasks_failed": 0, "active_workers": 0}
                     if row.event_type == "queue.task.completed":
-                        buckets[bucket]["tasks_completed"] = int(row.count or 0)
+                        buckets[bucket]["tasks_completed"] = int(
+                            row.count or 0)
                     elif row.event_type == "queue.task.failed":
                         buckets[bucket]["tasks_failed"] = int(row.count or 0)
 
@@ -666,7 +686,8 @@ class DashboardQueryService:
 
                 worker_result = await session.execute(worker_query)
                 for row in worker_result.all():
-                    worker_breakdown[row.worker_id or "unknown"] = int(row.count or 0)
+                    worker_breakdown[row.worker_id or "unknown"] = int(
+                        row.count or 0)
 
             response = {
                 "summary": {
@@ -710,7 +731,8 @@ class DashboardQueryService:
         use_cache: bool = True,
     ) -> dict[str, Any]:
         """Get webhook health metrics."""
-        date_range = resolve_date_range(start_time, end_time, period, default_days=7)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=7)
 
         cache_key = CacheKey.build(
             "webhook_health",
@@ -737,13 +759,16 @@ class DashboardQueryService:
             summary_query = select(
                 func.count(WebhookIngestion.id).label("total"),
                 func.count(
-                    func.nullif(WebhookIngestion.processing_status != WebhookIngestionStatus.completed.value, False)
+                    func.nullif(WebhookIngestion.processing_status !=
+                                WebhookIngestionStatus.completed.value, False)
                 ).label("processed"),
                 func.count(
-                    func.nullif(WebhookIngestion.processing_status == WebhookIngestionStatus.failed.value, False)
+                    func.nullif(WebhookIngestion.processing_status ==
+                                WebhookIngestionStatus.failed.value, False)
                 ).label("failed"),
                 func.count(
-                    func.nullif(WebhookIngestion.processing_status == WebhookIngestionStatus.received.value, False)
+                    func.nullif(WebhookIngestion.processing_status ==
+                                WebhookIngestionStatus.received.value, False)
                 ).label("pending"),
             ).where(and_(*conditions))
 
@@ -761,14 +786,16 @@ class DashboardQueryService:
             ).where(and_(*conditions)).group_by(WebhookIngestion.source)
 
             source_result = await session.execute(source_query)
-            by_source = {r.source: int(r.count or 0) for r in source_result.all()}
+            by_source = {r.source: int(r.count or 0)
+                         for r in source_result.all()}
 
             # Timeline
             timeline = []
             if include_timeline:
                 trunc_unit = granularity_to_trunc_unit("1h")
                 timeline_query = select(
-                    func.date_trunc(trunc_unit, WebhookIngestion.received_at).label("bucket"),
+                    func.date_trunc(
+                        trunc_unit, WebhookIngestion.received_at).label("bucket"),
                     func.count(WebhookIngestion.id).label("count"),
                 ).where(and_(*conditions)).group_by("bucket").order_by("bucket")
 
@@ -793,7 +820,8 @@ class DashboardQueryService:
                         WebhookIngestion.replay_count,
                     )
                     .where(
-                        and_(*conditions, WebhookIngestion.processing_status == WebhookIngestionStatus.failed.value)
+                        and_(*conditions, WebhookIngestion.processing_status ==
+                             WebhookIngestionStatus.failed.value)
                     )
                     .order_by(WebhookIngestion.received_at.desc())
                     .limit(limit_recent_failures)
@@ -843,7 +871,8 @@ class DashboardQueryService:
         use_cache: bool = True,
     ) -> dict[str, Any]:
         """Get retry analytics from message events."""
-        date_range = resolve_date_range(start_time, end_time, period, default_days=30)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=30)
 
         cache_key = CacheKey.build(
             "retry_analytics",
@@ -874,7 +903,8 @@ class DashboardQueryService:
             retry_query = select(
                 func.count(MessageTracking.id).label("total_retries"),
                 func.count(
-                    func.nullif(MessageTracking.current_status != MessageTrackingStatus.failed, False)
+                    func.nullif(MessageTracking.current_status !=
+                                MessageTrackingStatus.failed, False)
                 ).label("retry_failures"),
                 func.avg(MessageTracking.attempt_count).label("avg_attempts"),
             ).where(and_(*conditions))
@@ -890,18 +920,21 @@ class DashboardQueryService:
                 func.left(MessageTracking.last_error, 100).label("error"),
                 func.count(MessageTracking.id).label("count"),
             ).where(
-                and_(*conditions, MessageTracking.current_status == MessageTrackingStatus.failed)
+                and_(*conditions, MessageTracking.current_status ==
+                     MessageTrackingStatus.failed)
             ).group_by("error").order_by(func.count(MessageTracking.id).desc()).limit(10)
 
             error_result = await session.execute(error_query)
-            error_breakdown = {r.error or "Unknown": int(r.count or 0) for r in error_result.all()}
+            error_breakdown = {r.error or "Unknown": int(
+                r.count or 0) for r in error_result.all()}
 
             # Timeline
             timeline = []
             if include_timeline:
                 trunc_unit = granularity_to_trunc_unit("1d")
                 timeline_query = select(
-                    func.date_trunc(trunc_unit, MessageTracking.updated_at).label("bucket"),
+                    func.date_trunc(
+                        trunc_unit, MessageTracking.updated_at).label("bucket"),
                     func.count(MessageTracking.id).label("count"),
                 ).where(and_(*conditions)).group_by("bucket").order_by("bucket")
 
@@ -926,7 +959,8 @@ class DashboardQueryService:
                 },
                 "timeline": timeline,
                 "top_retry_error_types": [
-                    {"error_type": k, "count": v, "retry_rate": 0, "success_after_retry": 0}
+                    {"error_type": k, "count": v,
+                        "retry_rate": 0, "success_after_retry": 0}
                     for k, v in list(error_breakdown.items())[:5]
                 ],
                 "by_error_type": error_breakdown,
@@ -962,7 +996,8 @@ class DashboardQueryService:
         use_cache: bool = True,
     ) -> dict[str, Any]:
         """Get recovery analytics."""
-        date_range = resolve_date_range(start_time, end_time, period, default_days=30)
+        date_range = resolve_date_range(
+            start_time, end_time, period, default_days=30)
 
         cache_key = CacheKey.build(
             "recovery_analytics",
@@ -1194,7 +1229,8 @@ class DashboardQueryService:
                 and_(
                     MessageTracking.workspace_id == workspace_id,
                     MessageTracking.current_status == MessageTrackingStatus.sent,
-                    MessageTracking.sent_at >= datetime.now(timezone.utc) - timedelta(minutes=5),
+                    MessageTracking.sent_at >= datetime.now(
+                        timezone.utc) - timedelta(minutes=5),
                 )
             )
             inflight_result = await session.execute(inflight_query)
@@ -1204,7 +1240,8 @@ class DashboardQueryService:
             minute_query = select(func.count(MessageTracking.id)).where(
                 and_(
                     MessageTracking.workspace_id == workspace_id,
-                    MessageTracking.created_at >= datetime.now(timezone.utc) - timedelta(minutes=1),
+                    MessageTracking.created_at >= datetime.now(
+                        timezone.utc) - timedelta(minutes=1),
                 )
             )
             minute_result = await session.execute(minute_query)

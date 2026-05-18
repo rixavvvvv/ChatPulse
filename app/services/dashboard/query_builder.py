@@ -113,7 +113,8 @@ def resolve_date_range(
 
     # If explicit times provided
     if start_time and end_time:
-        start = start_time if start_time.tzinfo else start_time.replace(tzinfo=tz)
+        start = start_time if start_time.tzinfo else start_time.replace(
+            tzinfo=tz)
         end = end_time if end_time.tzinfo else end_time.replace(tzinfo=tz)
         days = (end - start).days
         return DateRangeResult(
@@ -134,15 +135,19 @@ def resolve_date_range(
                 end = now
             elif period_lower == "yesterday":
                 yesterday = now - timedelta(days=1)
-                start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+                start = yesterday.replace(
+                    hour=0, minute=0, second=0, microsecond=0)
                 end = start + timedelta(days=1)
             elif period_lower == "this_month":
-                start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                start = now.replace(day=1, hour=0, minute=0,
+                                    second=0, microsecond=0)
                 end = now
             elif period_lower == "last_month":
-                first_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                first_this_month = now.replace(
+                    day=1, hour=0, minute=0, second=0, microsecond=0)
                 last_month_end = first_this_month
-                last_month_start = (last_month_end - timedelta(days=1)).replace(day=1)
+                last_month_start = (
+                    last_month_end - timedelta(days=1)).replace(day=1)
                 start = last_month_start
                 end = last_month_end
             else:
