@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.queue_dead_letter import QueueDeadLetter
 from app.models.workflow import WorkflowExecution
-from app.models.workflow_delayed import WorkflowDelayed
+from app.models.workflow_delayed import DelayedExecution
 from app.services.queue_monitoring_service import celery_inspect_snapshot
-from app.services.redis_pubsub_manager import get_redis_manager
+from app.services.redis_pubsub_manager import get_redis_pubsub_manager
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -69,7 +69,7 @@ async def check_postgres_health(session: AsyncSession) -> dict[str, Any]:
         workflow_executions = result.scalar() or 0
 
         result = await session.execute(
-            select(func.count(WorkflowDelayed.id))
+            select(func.count(DelayedExecution.id))
         )
         delayed_executions = result.scalar() or 0
 
@@ -242,17 +242,17 @@ async def get_delayed_executions_count(session: AsyncSession) -> dict[str, Any]:
     try:
         # Count pending delayed executions
         result = await session.execute(
-            select(func.count(WorkflowDelayed.id))
-            .where(WorkflowDelayed.execute_at > datetime.now(timezone.utc))
+            select(func.count(DelayedExecution.id))
+            .where(DelayedExecution.execute_at > datetime.now(timezone.utc))
         )
         pending = result.scalar() or 0
 
         # Count overdue
         result = await session.execute(
-            select(func.count(WorkflowDelayed.id))
+            select(func.count(DelayedExecution.id))
             .where(
-                WorkflowDelayed.execute_at <= datetime.now(timezone.utc),
-                WorkflowDelayed.status == "pending"
+                DelayedExecution.execute_at <= datetime.now(timezone.utc),
+                DelayedExecution.status == "pending"
             )
         )
         overdue = result.scalar() or 0

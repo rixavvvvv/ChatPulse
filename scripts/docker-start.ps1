@@ -111,7 +111,7 @@ if ($frontendReady) {
 }
 
 Write-Host ""
-Write-Host "🎉 ChatPulse is now running!" -ForegroundColor Green
+Write-Host "ChatPulse is now running!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Services:" -ForegroundColor White
 Write-Host "  - Frontend:   http://localhost:3000" -ForegroundColor Cyan

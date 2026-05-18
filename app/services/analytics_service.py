@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -129,8 +131,6 @@ Provides:
 - Real-time metrics
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -158,7 +158,6 @@ from app.models.analytics import (
     create_event_id,
     get_aggregation_key,
 )
-from app.services.queue_service import get_queue_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

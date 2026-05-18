@@ -17,7 +17,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-import aioredis
 from redis import asyncio as aio_redis
 
 logger = logging.getLogger(__name__)

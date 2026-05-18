@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,8 +59,6 @@ Provides:
 - Rollup data
 - Real-time metrics
 """
-
-from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone

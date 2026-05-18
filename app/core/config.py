@@ -166,8 +166,8 @@ class Settings(BaseSettings):
         default=False,
         alias="DATABASE_USE_NULL_POOL",
     )
-    cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000"],
+    cors_origins_raw: str = Field(
+        default="http://localhost:3000",
         alias="CORS_ORIGINS",
     )
 
@@ -178,15 +178,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, value: Any) -> list[str]:
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        if isinstance(value, list):
-            return value
-        raise ValueError(
-            "CORS_ORIGINS must be a comma-separated string or a list")
+    @property
+    def cors_origins(self) -> list[str]:
+        if self.cors_origins_raw.startswith("["):
+            import json
+            return json.loads(self.cors_origins_raw)
+        return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]
 
     @field_validator("access_token_expire_minutes")
     @classmethod

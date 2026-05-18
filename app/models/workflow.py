@@ -56,7 +56,6 @@ class WorkflowDefinition(Base):
     timeout_seconds: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        description="Per-workflow execution timeout in seconds. Null uses global default.",
     )
     created_by: Mapped[int] = mapped_column(
         ForeignKey("users.id"),
@@ -175,13 +174,11 @@ class WorkflowExecution(Base):
     timeout_seconds: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        description="Execution-specific timeout override in seconds",
     )
     timeout_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
-        description="Computed timeout deadline",
     )
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
@@ -190,12 +187,10 @@ class WorkflowExecution(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        description="Timestamp when cancellation was requested",
     )
     cancellation_reason: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
-        description="Reason for cancellation (e.g., 'timeout', 'user_request')",
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -250,12 +245,10 @@ class NodeExecution(Base):
     timeout_seconds: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        description="Per-node timeout override in seconds",
     )
     timeout_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        description="Computed node timeout deadline",
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempt_count: Mapped[int] = mapped_column(

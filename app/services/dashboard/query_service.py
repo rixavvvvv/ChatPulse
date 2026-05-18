@@ -28,14 +28,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db_session
 from app.models.analytics import AnalyticsEvent, AnalyticsRollup
 from app.models.campaign import Campaign, CampaignStatus
-from app.models.campaign_contact import CampaignContact, DeliveryStatus
+from app.models.campaign_contact import CampaignContact, CampaignContactDeliveryStatus
 from app.models.message_event import MessageEvent, MessageEventStatus
 from app.models.message_tracking import MessageTracking, MessageTrackingStatus
 from app.models.queue_dead_letter import QueueDeadLetter
 from app.models.webhook_ingestion import WebhookIngestion, WebhookIngestionStatus
 from app.services.dashboard.cache import CacheKey, get_dashboard_cache
 from app.services.dashboard.query_builder import (
-    CacheConfig,
     FilterSpec,
     PaginationInput,
     build_pagination,
@@ -171,7 +170,7 @@ class DashboardQueryService:
                 ).where(
                     and_(
                         CampaignContact.campaign_id == campaign_id,
-                        CampaignContact.delivery_status == DeliveryStatus.pending,
+                        CampaignContact.delivery_status == CampaignContactDeliveryStatus.pending,
                     )
                 )
                 pending_result = await session.execute(pending_query)
