@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { inboxService } from "@/services/inbox/inbox-service";
 import { ConversationMessage } from "@/types";
+import type { SendMessagePayload } from "@/services/inbox/inbox-service";
 import toast from "react-hot-toast";
 
 const defaultLimit = 30;
@@ -59,9 +60,9 @@ export function useSendMessageMutation(conversationId?: number) {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (content: string) =>
-            inboxService.sendMessage(conversationId as number, content),
-        onMutate: async (content) => {
+        mutationFn: (payload: SendMessagePayload) =>
+            inboxService.sendMessage(conversationId as number, payload),
+        onMutate: async (payload) => {
             if (!conversationId) return;
             await queryClient.cancelQueries({
                 queryKey: ["inbox", "messages", conversationId],
@@ -80,10 +81,13 @@ export function useSendMessageMutation(conversationId?: number) {
                 direction: "outbound",
                 sender_type: "agent",
                 sender_id: undefined,
-                content_type: "text",
-                content,
+                content_type: payload.content_type ?? "text",
+                content: payload.content,
                 provider_message_id: null,
-                metadata_json: {},
+                metadata_json: {
+                    ...(payload.metadata_json ?? {}),
+                    status: "sending",
+                },
                 created_at: new Date().toISOString(),
             };
 

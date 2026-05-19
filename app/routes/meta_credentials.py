@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +32,8 @@ from app.services.meta_credential_service import (
     get_workspace_meta_credential_summary,
     get_workspace_meta_credentials,
     has_matching_callback_host,
+    list_all_app_secrets,
+    list_all_webhook_verify_tokens,
     upsert_workspace_meta_credential,
 )
 from app.services.whatsapp_service import ApiError, validate_meta_cloud_credentials
@@ -37,6 +41,7 @@ from app.services.template_service import sync_all_templates_from_meta
 
 router = APIRouter(prefix="/meta", tags=["Meta"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/connect", response_model=MetaStatusResponse)
@@ -45,6 +50,7 @@ async def connect_meta_credentials(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_current_workspace),
 ) -> MetaStatusResponse:
+    record = None
     try:
         await validate_meta_cloud_credentials(
             phone_number_id=payload.phone_number_id,
@@ -62,10 +68,22 @@ async def connect_meta_credentials(
             webhook_verify_token=payload.webhook_verify_token,
         )
 
-        subscribed_apps = await ensure_waba_app_subscription(
-            access_token=payload.access_token,
-            business_account_id=payload.business_account_id,
-        )
+        try:
+            await ensure_waba_app_subscription(
+                access_token=payload.access_token,
+                business_account_id=payload.business_account_id,
+            )
+        except Exception:
+            # Do not block successful credential connection on webhook/app
+            # subscription sync failures. This can fail when token scopes are
+            # limited even though send APIs are valid.
+            logger.exception(
+                "meta.connect.subscription_sync_failed",
+                extra={
+                    "workspace_id": workspace.id,
+                    "business_account_id": payload.business_account_id,
+                },
+            )
 
         return MetaStatusResponse(
             phone_number_id=record.phone_number_id,
@@ -78,6 +96,20 @@ async def connect_meta_credentials(
                 status.HTTP_502_BAD_GATEWAY if exc.retryable else status.HTTP_400_BAD_REQUEST
             ),
             detail=str(exc),
+        )
+    except Exception:
+        logger.exception(
+            "meta.connect.failed_unexpected",
+            extra={
+                "workspace_id": workspace.id,
+                "phone_number_id": payload.phone_number_id,
+                "business_account_id": payload.business_account_id,
+                "credentials_persisted": bool(record),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to connect Meta credentials",
         )
 
 
@@ -377,6 +409,57 @@ async def test_webhook_verify_token(
         return {"ok": False, "reason": "No verify token configured"}
 
     return {"ok": payload.verify_token.strip() == expected.strip()}
+
+
+@router.get("/webhook-diagnostics")
+async def get_workspace_webhook_diagnostics(
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_current_workspace),
+) -> dict:
+    creds = await get_workspace_meta_credentials(workspace.id)
+    env_token = (settings.meta_webhook_verify_token or "").strip()
+    env_secret = (settings.meta_app_secret or "").strip()
+
+    workspace_token = (creds.webhook_verify_token or "").strip() if creds else ""
+    workspace_secret = (creds.app_secret or "").strip() if creds else ""
+
+    effective_tokens = [item for item in (env_token, workspace_token) if item]
+    effective_secrets = [item for item in (env_secret, workspace_secret) if item]
+    status = "healthy" if effective_tokens else "degraded"
+
+    try:
+        all_tokens = await list_all_webhook_verify_tokens(session)
+    except Exception:
+        all_tokens = []
+    try:
+        all_secrets = await list_all_app_secrets(session)
+    except Exception:
+        all_secrets = []
+
+    return {
+        "status": status,
+        "workspace_id": workspace.id,
+        "callback_url": (
+            f"{settings.public_base_url}/webhook/meta"
+            if settings.public_base_url
+            else None
+        ),
+        "verify_token": {
+            "env_configured": bool(env_token),
+            "workspace_configured": bool(workspace_token),
+            "effective_source": "env" if env_token else ("workspace" if workspace_token else None),
+            "effective_count": len(effective_tokens),
+            "global_workspace_token_count": len(all_tokens),
+        },
+        "signature": {
+            "env_configured": bool(env_secret),
+            "workspace_configured": bool(workspace_secret),
+            "validation_enabled": bool(effective_secrets),
+            "effective_source": "env" if env_secret else ("workspace" if workspace_secret else None),
+            "effective_count": len(effective_secrets),
+            "global_workspace_secret_count": len(all_secrets),
+        },
+    }
 
 
 @router.post("/rotate-token")

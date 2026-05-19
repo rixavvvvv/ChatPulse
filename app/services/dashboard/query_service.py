@@ -72,6 +72,15 @@ class DashboardQueryService:
     def __init__(self):
         self._cache = get_dashboard_cache()
 
+    def _safe_number(self, value: Any, default: float = 0.0) -> float:
+        """Convert nullable/invalid numeric values to a safe float."""
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
     # ─────────────────────────────────────────────────────────────────────────
     # Campaign Delivery Metrics
     # ─────────────────────────────────────────────────────────────────────────
@@ -1120,37 +1129,50 @@ class DashboardQueryService:
             if entry and entry.is_fresh():
                 return entry.data
 
-        # Get current period
-        current = await self.get_workspace_usage(
-            workspace_id=workspace_id,
-            start_time=date_range.start_time,
-            end_time=date_range.end_time,
-            period=period,
-            include_timeline=False,
-            include_top_campaigns=True,
-            use_cache=False,
-        )
-
-        summary = current["summary"]
+        try:
+            # Get current period
+            current = await self.get_workspace_usage(
+                workspace_id=workspace_id,
+                start_time=date_range.start_time,
+                end_time=date_range.end_time,
+                period=period,
+                include_timeline=False,
+                include_top_campaigns=True,
+                use_cache=False,
+            )
+            summary = current.get("summary", {})
+        except Exception:
+            logger.exception(
+                "dashboard_overview.workspace_usage_failed",
+                extra={"workspace_id": workspace_id, "period": period},
+            )
+            summary = {}
 
         # Get previous period for comparison
         previous = None
         changes = {}
         if compare_previous:
             comp_range = get_comparison_range(date_range)
-            prev_data = await self.get_workspace_usage(
-                workspace_id=workspace_id,
-                start_time=comp_range.start_time,
-                end_time=comp_range.end_time,
-                include_timeline=False,
-                use_cache=False,
-            )
-            previous = prev_data["summary"]
+            try:
+                prev_data = await self.get_workspace_usage(
+                    workspace_id=workspace_id,
+                    start_time=comp_range.start_time,
+                    end_time=comp_range.end_time,
+                    include_timeline=False,
+                    use_cache=False,
+                )
+                previous = prev_data.get("summary", {})
+            except Exception:
+                logger.exception(
+                    "dashboard_overview.previous_period_failed",
+                    extra={"workspace_id": workspace_id, "period": period},
+                )
+                previous = {}
 
             # Calculate changes
             for key in ["messages_sent", "messages_delivered", "campaigns_created"]:
-                curr_val = summary.get(key, 0)
-                prev_val = previous.get(key, 0)
+                curr_val = self._safe_number(summary.get(key), 0.0)
+                prev_val = self._safe_number((previous or {}).get(key), 0.0)
                 if prev_val > 0:
                     change = ((curr_val - prev_val) / prev_val) * 100
                 else:
@@ -1168,9 +1190,9 @@ class DashboardQueryService:
             "total_campaigns": summary.get("campaigns_created", 0),
             "campaigns_completed": summary.get("campaigns_completed", 0),
             "campaigns_active": summary.get("campaigns_active", 0),
-            "delivery_rate": summary.get("delivery_rate", 0),
-            "read_rate": summary.get("read_rate", 0),
-            "error_rate": summary.get("failure_rate", 0),
+            "delivery_rate": self._safe_number(summary.get("delivery_rate"), 0.0),
+            "read_rate": self._safe_number(summary.get("read_rate"), 0.0),
+            "error_rate": self._safe_number(summary.get("failure_rate"), 0.0),
             "queue_depth": 0,
             "active_workers": 0,
             "health_score": self._calculate_health_score(summary),
@@ -1213,53 +1235,89 @@ class DashboardQueryService:
             if entry and entry.is_fresh():
                 return entry.data
 
-        async with get_db_session() as session:
-            # Active campaigns
-            active_query = select(func.count(Campaign.id)).where(
-                and_(
-                    Campaign.workspace_id == workspace_id,
-                    Campaign.status == CampaignStatus.running,
+        try:
+            async with get_db_session() as session:
+                now = datetime.now(timezone.utc)
+                # Active campaigns
+                active_query = select(func.count(Campaign.id)).where(
+                    and_(
+                        Campaign.workspace_id == workspace_id,
+                        Campaign.status == CampaignStatus.running,
+                    )
                 )
-            )
-            active_result = await session.execute(active_query)
-            active_campaigns = int(active_result.scalar() or 0)
+                active_result = await session.execute(active_query)
+                active_campaigns = int(active_result.scalar() or 0)
 
-            # Messages in flight (sent but not delivered/failed)
-            inflight_query = select(func.count(MessageTracking.id)).where(
-                and_(
-                    MessageTracking.workspace_id == workspace_id,
-                    MessageTracking.current_status == MessageTrackingStatus.sent,
-                    MessageTracking.sent_at >= datetime.now(
-                        timezone.utc) - timedelta(minutes=5),
+                # Messages in flight (sent but not delivered/failed)
+                inflight_query = select(func.count(MessageTracking.id)).where(
+                    and_(
+                        MessageTracking.workspace_id == workspace_id,
+                        MessageTracking.current_status == MessageTrackingStatus.sent,
+                        MessageTracking.sent_at >= now - timedelta(minutes=5),
+                    )
                 )
-            )
-            inflight_result = await session.execute(inflight_query)
-            messages_in_flight = int(inflight_result.scalar() or 0)
+                inflight_result = await session.execute(inflight_query)
+                messages_in_flight = int(inflight_result.scalar() or 0)
 
-            # Messages last minute
-            minute_query = select(func.count(MessageTracking.id)).where(
-                and_(
-                    MessageTracking.workspace_id == workspace_id,
-                    MessageTracking.created_at >= datetime.now(
-                        timezone.utc) - timedelta(minutes=1),
+                # Messages last minute
+                minute_query = select(func.count(MessageTracking.id)).where(
+                    and_(
+                        MessageTracking.workspace_id == workspace_id,
+                        MessageTracking.created_at >= now - timedelta(minutes=1),
+                    )
                 )
-            )
-            minute_result = await session.execute(minute_query)
-            messages_last_minute = int(minute_result.scalar() or 0)
+                minute_result = await session.execute(minute_query)
+                messages_last_minute = int(minute_result.scalar() or 0)
 
-            response = {
+                # Messages last hour
+                hour_query = select(func.count(MessageTracking.id)).where(
+                    and_(
+                        MessageTracking.workspace_id == workspace_id,
+                        MessageTracking.created_at >= now - timedelta(hours=1),
+                    )
+                )
+                hour_result = await session.execute(hour_query)
+                messages_last_hour = int(hour_result.scalar() or 0)
+
+                response = {
+                    "workspace_id": workspace_id,
+                    "updated_at": now.isoformat(),
+                    "active_campaigns": active_campaigns,
+                    "messages_in_flight": messages_in_flight,
+                    "queue_depth": messages_in_flight,
+                    "active_workers": 0,
+                    "messages_last_minute": messages_last_minute,
+                    "messages_last_hour": messages_last_hour,
+                    "messages_per_second": round(messages_last_minute / 60, 2),
+                    "avg_queue_latency_ms": None,
+                    "avg_dispatch_latency_ms": None,
+                    "p95_dispatch_latency_ms": None,
+                    "error_rate_percent": 0.0,
+                }
+
+                await self._cache.set(cache_key, response, "realtime")
+                return response
+        except Exception:
+            logger.exception(
+                "dashboard_realtime.query_failed",
+                extra={"workspace_id": workspace_id},
+            )
+            fallback = {
                 "workspace_id": workspace_id,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                "active_campaigns": active_campaigns,
-                "messages_in_flight": messages_in_flight,
-                "messages_per_second": round(messages_last_minute / 60, 2),
-                "messages_last_minute": messages_last_minute,
-                "queue_depth": messages_in_flight,
+                "active_campaigns": 0,
+                "messages_in_flight": 0,
+                "queue_depth": 0,
+                "active_workers": 0,
+                "messages_last_minute": 0,
+                "messages_last_hour": 0,
+                "messages_per_second": 0.0,
+                "avg_queue_latency_ms": None,
+                "avg_dispatch_latency_ms": None,
+                "p95_dispatch_latency_ms": None,
                 "error_rate_percent": 0.0,
             }
-
-            await self._cache.set(cache_key, response, "realtime")
-            return response
+            return fallback
 
     # ─────────────────────────────────────────────────────────────────────────
     # Alerts

@@ -6,7 +6,7 @@ interface TypingIndicatorProps {
     label?: string;
 }
 
-export function TypingIndicator({ isActive, label = "Typing" }: TypingIndicatorProps) {
+export function TypingIndicator({ isActive, label = "Typing..." }: TypingIndicatorProps) {
     if (!isActive) return null;
 
     return (

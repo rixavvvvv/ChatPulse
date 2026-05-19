@@ -28,6 +28,7 @@ import { useInboxSocket } from "@/hooks/inbox/useInboxSocket";
 import { inboxService } from "@/services/inbox/inbox-service";
 import { useAuthStore } from "@/stores/auth";
 import { useWebSocket } from "@/websocket/provider";
+import type { ConversationMessage } from "@/types";
 
 export default function InboxPage() {
     const {
@@ -40,6 +41,8 @@ export default function InboxPage() {
         setUnread,
         connection,
         setFilters,
+        pinnedConversationIds,
+        togglePinned,
     } = useInboxStore();
 
     const { user } = useAuthStore();
@@ -102,6 +105,15 @@ export default function InboxPage() {
         setUnread(conversationId, 0);
     };
 
+    const handleRetry = (message: ConversationMessage) => {
+        if (!selectedConversationId) return;
+        sendMessageMutation.mutate({
+            content: message.content,
+            content_type: message.content_type,
+            metadata_json: message.metadata_json ?? {},
+        });
+    };
+
     return (
         <PageLayout
             title="Shared Inbox"
@@ -113,7 +125,9 @@ export default function InboxPage() {
                     conversations={conversations}
                     selectedId={selectedConversationId}
                     unreadByConversation={unreadByConversation}
+                    pinnedIds={pinnedConversationIds}
                     onSelect={handleSelectConversation}
+                    onTogglePin={togglePinned}
                     search={search}
                     onSearchChange={setSearch}
                     filters={{ status: filters.status, channel: filters.channel }}
@@ -137,9 +151,10 @@ export default function InboxPage() {
                         isTyping={typing.length > 0}
                         onLoadMore={() => messagesQuery.fetchNextPage()}
                         hasMore={messagesQuery.hasNextPage}
+                        onRetryMessage={handleRetry}
                     />
                     <MessageComposer
-                        onSend={(text) => sendMessageMutation.mutate(text)}
+                        onSend={(payload) => sendMessageMutation.mutate(payload)}
                         disabled={!selectedConversationId || sendMessageMutation.isPending}
                         onTypingStart={() => {
                             if (!selectedConversationId) return;

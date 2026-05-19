@@ -27,6 +27,12 @@ export interface MessagesParams {
     after_id?: number;
 }
 
+export interface SendMessagePayload {
+    content: string;
+    content_type?: string;
+    metadata_json?: Record<string, unknown>;
+}
+
 export const inboxService = {
     listConversations: (params: ConversationListParams) =>
         apiClient.get<ConversationListItem[]>("/conversations", { params }),
@@ -39,9 +45,11 @@ export const inboxService = {
             params,
         }),
 
-    sendMessage: (conversationId: number, content: string) =>
+    sendMessage: (conversationId: number, payload: SendMessagePayload) =>
         apiClient.post<ConversationMessage>(`/conversations/${conversationId}/messages`, {
-            content,
+            content: payload.content,
+            content_type: payload.content_type ?? "text",
+            metadata_json: payload.metadata_json ?? {},
         }),
 
     markRead: (conversationId: number, lastReadMessageId?: number) =>

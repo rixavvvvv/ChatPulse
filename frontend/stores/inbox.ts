@@ -28,6 +28,7 @@ interface InboxStore {
         assignedTo?: number;
         labelId?: number;
     };
+    pinnedConversationIds: number[];
     typingByConversation: Record<number, TypingState[]>;
     presenceByUser: Record<number, PresenceState>;
     unreadByConversation: Record<number, number>;
@@ -35,6 +36,8 @@ interface InboxStore {
     setSelectedConversation: (conversationId: number | null) => void;
     setSearch: (value: string) => void;
     setFilters: (filters: InboxStore["filters"]) => void;
+    togglePinned: (conversationId: number) => void;
+    isPinned: (conversationId: number) => boolean;
     setTyping: (conversationId: number, typing: TypingState[]) => void;
     addTyping: (conversationId: number, typing: TypingState) => void;
     removeTyping: (conversationId: number, userId: number) => void;
@@ -43,7 +46,7 @@ interface InboxStore {
     setConnection: (connection: Partial<ConnectionState>) => void;
 }
 
-export const useInboxStore = create<InboxStore>((set) => ({
+export const useInboxStore = create<InboxStore>((set, get) => ({
     selectedConversationId: null,
     search: "",
     filters: {},
@@ -55,9 +58,21 @@ export const useInboxStore = create<InboxStore>((set) => ({
         lastConnectedAt: null,
         lastError: null,
     },
+    pinnedConversationIds: [],
     setSelectedConversation: (conversationId) => set({ selectedConversationId: conversationId }),
     setSearch: (value) => set({ search: value }),
     setFilters: (filters) => set({ filters }),
+    togglePinned: (conversationId) =>
+        set((state) => {
+            const exists = state.pinnedConversationIds.includes(conversationId);
+            return {
+                pinnedConversationIds: exists
+                    ? state.pinnedConversationIds.filter((id) => id !== conversationId)
+                    : [...state.pinnedConversationIds, conversationId],
+            };
+        }),
+    isPinned: (conversationId) =>
+        get().pinnedConversationIds.includes(conversationId),
     setTyping: (conversationId, typing) =>
         set((state) => ({
             typingByConversation: {

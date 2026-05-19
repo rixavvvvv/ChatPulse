@@ -68,6 +68,27 @@ export type MetaConnectionResponse = {
     health?: MetaHealthSummary | null;
 };
 
+export type MetaWebhookDiagnostics = {
+    status: string;
+    workspace_id: number;
+    callback_url?: string | null;
+    verify_token: {
+        env_configured: boolean;
+        workspace_configured: boolean;
+        effective_source?: string | null;
+        effective_count: number;
+        global_workspace_token_count: number;
+    };
+    signature: {
+        env_configured: boolean;
+        workspace_configured: boolean;
+        validation_enabled: boolean;
+        effective_source?: string | null;
+        effective_count: number;
+        global_workspace_secret_count: number;
+    };
+};
+
 function requireToken(): string {
     const session = getSession();
     if (!session?.access_token) {
@@ -134,4 +155,9 @@ export async function syncMetaTemplates(): Promise<{ created: number; updated: n
         { method: "POST" },
         token,
     );
+}
+
+export async function getMetaWebhookDiagnostics(): Promise<MetaWebhookDiagnostics> {
+    const token = requireToken();
+    return apiRequest<MetaWebhookDiagnostics>("/meta/webhook-diagnostics", {}, token);
 }

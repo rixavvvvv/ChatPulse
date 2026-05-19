@@ -25,7 +25,65 @@ class CompiledFilter:
     where_clause: ColumnElement[bool]
 
 
+def normalize_definition(definition: dict[str, Any]) -> dict[str, Any]:
+    """Normalize legacy/frontend payloads into canonical DSL (op/children/child)."""
+    if not isinstance(definition, dict):
+        raise SegmentDefinitionError("definition must be an object")
+
+    # Legacy group style: { operator: "and", conditions: [...] }
+    if "operator" in definition and "conditions" in definition:
+        op = str(definition.get("operator", "")).lower()
+        children = definition.get("conditions") or []
+        return {
+            "op": op,
+            "children": [normalize_definition(child) for child in children],
+        }
+
+    # Already canonical group
+    if "op" in definition and definition.get("op") in {"and", "or"}:
+        children = definition.get("children") or []
+        return {
+            "op": definition["op"],
+            "children": [normalize_definition(child) for child in children],
+        }
+
+    # Canonical unary group
+    if definition.get("op") == "not":
+        child = definition.get("child")
+        return {"op": "not", "child": normalize_definition(child)}
+
+    # Legacy/simple condition style
+    if "field" in definition and ("operator" in definition or "op" in definition):
+        raw_op = definition.get("op", definition.get("operator"))
+        op = str(raw_op).lower() if raw_op is not None else ""
+
+        if op == "equals":
+            op = "eq"
+        elif op in {"not_equals", "not-equals"}:
+            op = "neq"
+
+        normalized: dict[str, Any] = {"op": op, "field": definition.get("field")}
+        if "value" in definition:
+            normalized["value"] = definition.get("value")
+        if "values" in definition:
+            normalized["values"] = definition.get("values")
+        if "tag" in definition:
+            normalized["tag"] = definition.get("tag")
+        if "key" in definition:
+            normalized["key"] = definition.get("key")
+        if "cmp" in definition:
+            normalized["cmp"] = definition.get("cmp")
+        return normalized
+
+    # Single has_tag shorthand
+    if "tag" in definition and "op" not in definition:
+        return {"op": "has_tag", "tag": definition.get("tag")}
+
+    return definition
+
+
 def validate_definition(definition: dict[str, Any]) -> None:
+    definition = normalize_definition(definition)
     if not isinstance(definition, dict):
         raise SegmentDefinitionError("definition must be an object")
     op = definition.get("op")
@@ -79,8 +137,9 @@ def validate_definition(definition: dict[str, Any]) -> None:
 
 
 def compile_to_where_clause(*, workspace_id: int, definition: dict[str, Any]) -> CompiledFilter:
-    validate_definition(definition)
-    clause = _compile_node(workspace_id=workspace_id, node=definition)
+    normalized = normalize_definition(definition)
+    validate_definition(normalized)
+    clause = _compile_node(workspace_id=workspace_id, node=normalized)
     return CompiledFilter(where_clause=clause)
 
 

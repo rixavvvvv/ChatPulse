@@ -19,6 +19,7 @@ import {
     useMetaSyncTemplates,
     useMetaValidate,
     useMetaWebhookSubscribe,
+    useMetaWebhookDiagnostics,
     useMetaWebhookTest,
 } from "@/hooks/useMetaConnection";
 
@@ -34,6 +35,7 @@ export default function MetaIntegrationPage() {
     const subscribeMutation = useMetaWebhookSubscribe();
     const webhookTestMutation = useMetaWebhookTest();
     const syncMutation = useMetaSyncTemplates();
+    const diagnosticsQuery = useMetaWebhookDiagnostics();
 
     const credentials = metaQuery.data?.credentials;
     const phoneNumbers = metaQuery.data?.phone_numbers ?? [];
@@ -41,6 +43,7 @@ export default function MetaIntegrationPage() {
     const webhook = metaQuery.data?.webhook;
     const tokenStatus = metaQuery.data?.token_status;
     const health = metaQuery.data?.health;
+    const diagnostics = diagnosticsQuery.data;
 
     const healthStatus = useMemo(() => {
         if (!credentials?.is_connected) return "disconnected";
@@ -234,6 +237,21 @@ export default function MetaIntegrationPage() {
                     <div className="text-xs text-muted-foreground">Review: {waba?.account_review_status || "n/a"}</div>
                 </MetaStatusCard>
             </div>
+
+            <MetaStatusCard title="Webhook Diagnostics" description="Verification and signature resolution">
+                {diagnosticsQuery.isLoading ? (
+                    <div className="text-xs text-muted-foreground">Loading diagnostics...</div>
+                ) : diagnosticsQuery.error ? (
+                    <div className="text-xs text-rose-600">Unable to load diagnostics</div>
+                ) : (
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                        <div>Status: <span className="text-sm text-slate-900">{diagnostics?.status || "unknown"}</span></div>
+                        <div>Verify source: {diagnostics?.verify_token?.effective_source || "none"}</div>
+                        <div>Signature source: {diagnostics?.signature?.effective_source || "none"}</div>
+                        <div>Signature validation: {diagnostics?.signature?.validation_enabled ? "On" : "Off"}</div>
+                    </div>
+                )}
+            </MetaStatusCard>
 
             <Card>
                 <CardHeader>

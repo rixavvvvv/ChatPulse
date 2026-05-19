@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, TypeVar
 
 import redis.asyncio as redis
@@ -261,8 +261,10 @@ class DashboardCacheService:
         entry = CacheEntry(
             data=data,
             created_at=now,
-            expires_at=now.timestamp() + config.ttl_seconds,
-            stale_at=(now.timestamp() + config.stale_ttl_seconds) if config.stale_ttl_seconds > config.ttl_seconds else None,
+            expires_at=now + timedelta(seconds=config.ttl_seconds),
+            stale_at=(
+                now + timedelta(seconds=config.stale_ttl_seconds)
+            ) if config.stale_ttl_seconds > config.ttl_seconds else None,
             compute_time_ms=compute_time_ms,
             cache_key=key,
         )

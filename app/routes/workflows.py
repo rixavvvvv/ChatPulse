@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,9 +20,80 @@ from app.schemas.workflow import (
     TriggerWorkflowRequest,
 )
 from app.services import workflow_service
+from app.services.workflow_graph_validator import WorkflowGraphValidator
 from app.services.workflow_engine import start_workflow
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
+logger = logging.getLogger(__name__)
+
+
+def _validate_workflow_graph(
+    *,
+    workspace_id: int,
+    name: str,
+    created_by: int,
+    nodes: list[dict],
+    edges: list[dict],
+) -> None:
+    """Run graph validation before persisting workflow changes."""
+    from app.models.workflow import (
+        WorkflowDefinition,
+        WorkflowEdge,
+        WorkflowNode,
+        WorkflowStatus as ModelWorkflowStatus,
+    )
+
+    workflow = WorkflowDefinition(
+        workspace_id=workspace_id,
+        name=name,
+        description=None,
+        status=ModelWorkflowStatus.draft,
+        definition={"nodes": nodes, "edges": edges},
+        created_by=created_by,
+    )
+    workflow.nodes = [
+        WorkflowNode(
+            workflow_definition_id=0,
+            node_id=node["node_id"],
+            node_type=node["node_type"],
+            name=node["name"],
+            config=node.get("config", {}),
+            position_x=node.get("position", {}).get("x", 0),
+            position_y=node.get("position", {}).get("y", 0),
+        )
+        for node in nodes
+    ]
+    workflow.edges = [
+        WorkflowEdge(
+            workflow_definition_id=0,
+            edge_id=edge["edge_id"],
+            source_node_id=edge["source_node_id"],
+            target_node_id=edge["target_node_id"],
+            condition=edge.get("condition"),
+        )
+        for edge in edges
+    ]
+
+    validator = WorkflowGraphValidator()
+    result = validator.validate_workflow(workflow)
+    if not result.is_valid:
+        logger.warning(
+            "workflow.graph_validation_failed",
+            extra={
+                "workspace_id": workspace_id,
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "errors": [e.to_dict() for e in result.errors],
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Workflow graph validation failed",
+                "errors": [e.to_dict() for e in result.errors],
+                "warnings": result.warnings,
+            },
+        )
 
 
 @router.post("", response_model=WorkflowDefinitionResponse, status_code=status.HTTP_201_CREATED)
@@ -51,17 +124,35 @@ async def create_workflow(
         for edge in workflow_data.edges
     ]
 
-    workflow = await workflow_service.create_workflow(
-        db,
+    _validate_workflow_graph(
         workspace_id=workspace_id,
         name=workflow_data.name,
-        description=workflow_data.description,
+        created_by=current_user.id,
         nodes=nodes,
         edges=edges,
-        created_by=current_user.id,
     )
-
-    return await workflow_service.get_workflow_by_id(db, workflow.id, workspace_id)
+    try:
+        workflow = await workflow_service.create_workflow(
+            db,
+            workspace_id=workspace_id,
+            name=workflow_data.name,
+            description=workflow_data.description,
+            nodes=nodes,
+            edges=edges,
+            created_by=current_user.id,
+        )
+        return await workflow_service.get_workflow_by_id(db, workflow.id, workspace_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "workflow.create_failed",
+            extra={"workspace_id": workspace_id, "name": workflow_data.name},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unable to create workflow due to invalid workflow structure or payload.",
+        )
 
 
 @router.get("", response_model=list[WorkflowListResponse])
@@ -130,17 +221,50 @@ async def update_workflow(
             for edge in workflow_data.edges
         ]
 
-    updated_workflow = await workflow_service.update_workflow(
-        db,
-        workflow,
-        name=workflow_data.name,
-        description=workflow_data.description,
-        status=workflow_data.status,
-        nodes=nodes,
-        edges=edges,
-    )
+    if nodes is not None or edges is not None:
+        effective_nodes = nodes if nodes is not None else workflow.definition.get("nodes", [])
+        effective_edges = edges if edges is not None else workflow.definition.get("edges", [])
+        _validate_workflow_graph(
+            workspace_id=workspace_id,
+            name=workflow_data.name or workflow.name,
+            created_by=workflow.created_by,
+            nodes=effective_nodes,
+            edges=effective_edges,
+        )
 
-    return await workflow_service.get_workflow_by_id(db, workflow_id, workspace_id)
+    if workflow_data.status == WorkflowStatus.published:
+        effective_nodes = nodes if nodes is not None else workflow.definition.get("nodes", [])
+        effective_edges = edges if edges is not None else workflow.definition.get("edges", [])
+        _validate_workflow_graph(
+            workspace_id=workspace_id,
+            name=workflow_data.name or workflow.name,
+            created_by=workflow.created_by,
+            nodes=effective_nodes,
+            edges=effective_edges,
+        )
+
+    try:
+        await workflow_service.update_workflow(
+            db,
+            workflow,
+            name=workflow_data.name,
+            description=workflow_data.description,
+            status=workflow_data.status,
+            nodes=nodes,
+            edges=edges,
+        )
+        return await workflow_service.get_workflow_by_id(db, workflow_id, workspace_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "workflow.update_failed",
+            extra={"workspace_id": workspace_id, "workflow_id": workflow_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unable to update workflow due to invalid workflow structure or payload.",
+        )
 
 
 @router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)

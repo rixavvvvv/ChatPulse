@@ -68,6 +68,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.dependencies.auth import get_current_user
+from app.dependencies.workspace import get_current_workspace
+from app.models.workspace import Workspace
 from app.models.analytics import (
     EventType,
     RollupGranularity,
@@ -448,9 +450,10 @@ async def get_workspace_metrics(
 
 @events_router.get("/workspace/dashboard")
 async def get_dashboard_summary(
-    workspace_id: int,
+    workspace_id: int | None = None,
     period: str = Query(default="today"),
     user=Depends(get_current_user),
+    workspace: Workspace = Depends(get_current_workspace),
 ) -> DashboardSummaryResponse:
     """
     Get dashboard summary for a workspace.
@@ -462,6 +465,10 @@ async def get_dashboard_summary(
     Returns:
         Dashboard summary
     """
+    effective_workspace_id = workspace.id
+    if workspace_id is not None and workspace_id != workspace.id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
     query_service = AnalyticsQueryService()
 
     now = datetime.now(timezone.utc)
@@ -480,24 +487,24 @@ async def get_dashboard_summary(
 
     # Get today's metrics
     today_metrics = await query_service.get_workspace_metrics(
-        workspace_id=workspace_id,
+        workspace_id=effective_workspace_id,
         period_start=today_start,
         period_end=now,
     )
 
     # Get yesterday's metrics
     yesterday_metrics = await query_service.get_workspace_metrics(
-        workspace_id=workspace_id,
+        workspace_id=effective_workspace_id,
         period_start=yesterday_start,
         period_end=today_start,
     )
 
     # Get real-time metrics
-    realtime = await query_service.get_realtime_metrics(workspace_id)
+    realtime = await query_service.get_realtime_metrics(effective_workspace_id)
 
     # Get rollups for dispatch time
     rollups = await query_service.get_rollups(
-        workspace_id=workspace_id,
+        workspace_id=effective_workspace_id,
         rollup_key="message.dispatch.duration",
         granularity=RollupGranularity.HOUR_1,
         start_time=start_time,
@@ -509,17 +516,29 @@ async def get_dashboard_summary(
         total = sum(r.duration_avg or 0 for r in rollups)
         avg_dispatch_ms = total / len(rollups)
 
+    realtime_active = 0
+    realtime_queue_depth = 0
+    realtime_error_rate = 0.0
+    if isinstance(realtime, dict):
+        realtime_active = int(realtime.get("active_campaigns") or 0)
+        realtime_queue_depth = int(realtime.get("queue_depth") or 0)
+        realtime_error_rate = float(realtime.get("error_rate_percent") or 0.0)
+    elif realtime is not None:
+        realtime_active = int(getattr(realtime, "active_campaigns", 0) or 0)
+        realtime_queue_depth = int(getattr(realtime, "queue_depth", 0) or 0)
+        realtime_error_rate = float(getattr(realtime, "error_rate_percent", 0.0) or 0.0)
+
     return DashboardSummaryResponse(
-        workspace_id=workspace_id,
+        workspace_id=effective_workspace_id,
         period=period,
         messages_sent_today=today_metrics.messages_sent if today_metrics else 0,
         messages_sent_yesterday=yesterday_metrics.messages_sent if yesterday_metrics else 0,
-        campaigns_active=realtime.active_campaigns if realtime else 0,
+        campaigns_active=realtime_active,
         campaigns_completed_today=today_metrics.campaigns_completed if today_metrics else 0,
         delivery_rate=(today_metrics.message_delivery_rate or 0) if today_metrics else 0,
         avg_dispatch_time_ms=avg_dispatch_ms,
-        queue_depth=realtime.queue_depth if realtime else 0,
-        error_rate=realtime.error_rate_percent if realtime else 0,
+        queue_depth=realtime_queue_depth,
+        error_rate=realtime_error_rate,
     )
 
 
@@ -570,8 +589,9 @@ async def get_campaign_metrics(
 
 @events_router.get("/realtime", response_model=RealtimeMetricsResponse)
 async def get_realtime_metrics(
-    workspace_id: int,
+    workspace_id: int | None = None,
     user=Depends(get_current_user),
+    workspace: Workspace = Depends(get_current_workspace),
 ) -> RealtimeMetricsResponse:
     """
     Get real-time metrics for a workspace.
@@ -582,13 +602,17 @@ async def get_realtime_metrics(
     Returns:
         Real-time metrics
     """
+    effective_workspace_id = workspace.id
+    if workspace_id is not None and workspace_id != workspace.id:
+        raise HTTPException(status_code=403, detail="Workspace access denied")
+
     query_service = AnalyticsQueryService()
-    metrics = await query_service.get_realtime_metrics(workspace_id)
+    metrics = await query_service.get_realtime_metrics(effective_workspace_id)
 
     if metrics is None:
         # Return default metrics
         return RealtimeMetricsResponse(
-            workspace_id=workspace_id,
+            workspace_id=effective_workspace_id,
             active_campaigns=0,
             messages_in_flight=0,
             queue_depth=0,
@@ -601,6 +625,31 @@ async def get_realtime_metrics(
             p95_dispatch_latency_ms=None,
             error_rate_percent=None,
             updated_at=datetime.now(timezone.utc),
+        )
+    if isinstance(metrics, dict):
+        return RealtimeMetricsResponse(
+            workspace_id=int(metrics.get("workspace_id") or effective_workspace_id),
+            active_campaigns=int(metrics.get("active_campaigns") or 0),
+            messages_in_flight=int(metrics.get("messages_in_flight") or 0),
+            queue_depth=int(metrics.get("queue_depth") or 0),
+            active_workers=int(metrics.get("active_workers") or 0),
+            messages_last_minute=int(metrics.get("messages_last_minute") or 0),
+            messages_last_hour=int(metrics.get("messages_last_hour") or 0),
+            messages_per_second=float(metrics.get("messages_per_second") or 0.0),
+            avg_queue_latency_ms=(
+                float(metrics["avg_queue_latency_ms"])
+                if metrics.get("avg_queue_latency_ms") is not None else None
+            ),
+            avg_dispatch_latency_ms=(
+                float(metrics["avg_dispatch_latency_ms"])
+                if metrics.get("avg_dispatch_latency_ms") is not None else None
+            ),
+            p95_dispatch_latency_ms=(
+                float(metrics["p95_dispatch_latency_ms"])
+                if metrics.get("p95_dispatch_latency_ms") is not None else None
+            ),
+            error_rate_percent=float(metrics.get("error_rate_percent") or 0.0),
+            updated_at=metrics.get("updated_at") or datetime.now(timezone.utc),
         )
 
     return RealtimeMetricsResponse(

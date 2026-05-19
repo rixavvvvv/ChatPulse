@@ -20,27 +20,17 @@
  */
 
 import type { SegmentNode, SegmentGroup, SegmentCondition } from "@/components/contacts/segment-builder";
+import {
+    type SegmentDslCondition,
+    type SegmentDslNode,
+    validateSegmentDsl,
+} from "@/lib/types/segment-dsl";
 
-interface BackendCondition {
+type BackendDefinition = SegmentDslCondition & {
     op: string;
-    field?: string;
-    value?: string | number | boolean | null;
-    values?: string[];
-    tag?: string;
-    key?: string;
-    cmp?: string;
-}
-
-interface BackendDefinition {
-    op: string;
-    children?: BackendCondition[];
-    field?: string;
-    value?: string | number | boolean | null;
-    values?: string[];
-    tag?: string;
-    key?: string;
-    cmp?: string;
-}
+    children?: BackendDefinition[];
+    child?: BackendDefinition;
+};
 
 function isGroup(node: SegmentNode | SegmentGroup): node is SegmentGroup {
     return "op" in node && "children" in node;
@@ -128,16 +118,17 @@ export function transformSegmentToBackend(segment: SegmentNode): BackendDefiniti
     if (!segment) return null;
 
     // If root is not a group, wrap it
-    if (!isGroup(segment)) {
-        return conditionToBackend(segment);
-    }
+    if (!isGroup(segment)) return conditionToBackend(segment);
 
     // Check for activity filters
     if (hasActivityFilter(segment)) {
         console.warn("Segment contains activity filters which are not supported by backend");
     }
 
-    return nodeToBackend(segment);
+    const normalized = nodeToBackend(segment);
+    const validation = validateSegmentDsl(normalized as SegmentDslNode);
+    if (!validation.valid) return null;
+    return normalized;
 }
 
 /**
@@ -180,6 +171,14 @@ export function validateSegmentForBackend(segment: SegmentNode): string[] {
 
     checkNode(segment, "root");
 
+    const backend = transformSegmentToBackend(segment);
+    if (!backend) {
+        errors.push("Segment definition is invalid");
+        return errors;
+    }
+
+    const dslValidation = validateSegmentDsl(backend as SegmentDslNode);
+    errors.push(...dslValidation.errors);
     return errors;
 }
 
@@ -191,7 +190,7 @@ export function parseBackendDefinition(definition: unknown): SegmentNode | null 
         return null;
     }
 
-    const def = definition as BackendDefinition;
+    const def = migrateLegacyDefinition(definition as Record<string, unknown>) as BackendDefinition;
 
     // If it's a simple condition (no children), wrap in group
     if (!def.children || def.children.length === 0) {
@@ -240,6 +239,45 @@ export function parseBackendDefinition(definition: unknown): SegmentNode | null 
     }
 
     return parseNode(def, generateId());
+}
+
+export function migrateLegacyDefinition(definition: Record<string, unknown>): Record<string, unknown> {
+    if (!definition || typeof definition !== "object") return definition;
+
+    // Legacy wrapper: { operator, conditions }
+    if ("operator" in definition && "conditions" in definition) {
+        const operator = String(definition.operator || "").toLowerCase();
+        const conditions = Array.isArray(definition.conditions) ? definition.conditions : [];
+        return {
+            op: operator,
+            children: conditions.map((c) => migrateLegacyDefinition((c || {}) as Record<string, unknown>)),
+        };
+    }
+
+    // Already canonical group
+    if (definition.op === "and" || definition.op === "or") {
+        const children = Array.isArray(definition.children) ? definition.children : [];
+        return {
+            ...definition,
+            children: children.map((c) => migrateLegacyDefinition((c || {}) as Record<string, unknown>)),
+        };
+    }
+
+    // Legacy condition style: { field, operator, value }
+    if ("field" in definition && "operator" in definition && !("op" in definition)) {
+        const operator = String(definition.operator || "").toLowerCase();
+        return {
+            op: operator === "equals" ? "eq" : operator,
+            field: definition.field,
+            value: definition.value,
+            values: definition.values,
+            tag: definition.tag,
+            key: definition.key,
+            cmp: definition.cmp,
+        };
+    }
+
+    return definition;
 }
 
 function generateId(): string {

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from redis.asyncio import Redis
@@ -11,8 +13,6 @@ from app.services.meta_credential_service import (
     list_all_webhook_verify_tokens,
 )
 from app.services.webhook_verification import (
-    meta_challenge_response,
-    meta_signature_valid,
     meta_signature_valid_with_secret,
     parse_json_object,
 )
@@ -23,6 +23,81 @@ from app.queue.rate_limit import (
 
 router = APIRouter(tags=["Webhooks"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+async def _resolve_verify_tokens(session: AsyncSession) -> list[str]:
+    tokens: list[str] = []
+    env_token = (settings.meta_webhook_verify_token or "").strip()
+    if env_token:
+        tokens.append(env_token)
+
+    try:
+        workspace_tokens = await list_all_webhook_verify_tokens(session)
+    except Exception:
+        logger.exception("meta.webhook.verify_token_resolution_failed")
+        workspace_tokens = []
+    tokens.extend(token.strip() for token in workspace_tokens if token and token.strip())
+
+    # Preserve order while deduplicating
+    deduped = list(dict.fromkeys(tokens))
+    return deduped
+
+
+async def _resolve_signature_secrets(session: AsyncSession) -> list[str]:
+    secrets: list[str] = []
+    env_secret = (settings.meta_app_secret or "").strip()
+    if env_secret:
+        secrets.append(env_secret)
+
+    try:
+        workspace_secrets = await list_all_app_secrets(session)
+    except Exception:
+        logger.exception("meta.webhook.app_secret_resolution_failed")
+        workspace_secrets = []
+    secrets.extend(secret.strip() for secret in workspace_secrets if secret and secret.strip())
+
+    return list(dict.fromkeys(secrets))
+
+
+async def _verify_meta_challenge(
+    *,
+    session: AsyncSession,
+    hub_mode: str | None,
+    hub_verify_token: str | None,
+    hub_challenge: str | None,
+) -> str | None:
+    mode = (hub_mode or "").strip().lower()
+    candidate = (hub_verify_token or "").strip()
+    challenge = (hub_challenge or "").strip()
+
+    if mode != "subscribe" or not challenge:
+        logger.warning(
+            "meta.webhook.verify.invalid_request",
+            extra={"mode": mode or None, "has_challenge": bool(challenge)},
+        )
+        return None
+
+    tokens = await _resolve_verify_tokens(session)
+    if not tokens:
+        logger.warning(
+            "meta.webhook.verify.no_token_configured",
+            extra={"mode": mode},
+        )
+        return None
+
+    matched = any(candidate == token for token in tokens)
+    logger.info(
+        "meta.webhook.verify.attempt",
+        extra={
+            "mode": mode,
+            "matched": matched,
+            "token_candidates": len(tokens),
+        },
+    )
+    if not matched:
+        return None
+    return hub_challenge or challenge
 
 
 @router.get("/webhook/meta", response_class=PlainTextResponse)
@@ -33,37 +108,14 @@ async def verify_meta_webhook(
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
     session: AsyncSession = Depends(get_db_session),
 ) -> PlainTextResponse:
-    challenge = meta_challenge_response(
+    challenge = await _verify_meta_challenge(
+        session=session,
         hub_mode=hub_mode,
         hub_verify_token=hub_verify_token,
         hub_challenge=hub_challenge,
     )
     if challenge is not None:
         return PlainTextResponse(content=challenge, status_code=status.HTTP_200_OK)
-
-    if settings.meta_webhook_verify_token:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Meta webhook verification failed",
-        )
-
-    tokens = await list_all_webhook_verify_tokens(session)
-    if not tokens:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Meta webhook verification failed",
-        )
-
-    candidate = (hub_verify_token or "").strip()
-    if not candidate:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Meta webhook verification failed",
-        )
-
-    if any(candidate == token for token in tokens):
-        return PlainTextResponse(content=hub_challenge or "", status_code=status.HTTP_200_OK)
-
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Meta webhook verification failed",
@@ -81,6 +133,40 @@ async def get_meta_webhook_config() -> dict[str, str | bool | None]:
         "verify_token_configured": bool(settings.meta_webhook_verify_token),
         "signature_validation_enabled": bool(settings.meta_app_secret),
         "public_base_url": settings.public_base_url,
+    }
+
+
+@router.get("/webhook/meta/diagnostics")
+async def get_meta_webhook_diagnostics(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, str | bool | int | None]:
+    tokens = await _resolve_verify_tokens(session)
+    secrets = await _resolve_signature_secrets(session)
+    try:
+        workspace_tokens = await list_all_webhook_verify_tokens(session)
+    except Exception:
+        workspace_tokens = []
+    try:
+        workspace_secrets = await list_all_app_secrets(session)
+    except Exception:
+        workspace_secrets = []
+    mode = "healthy" if tokens else "degraded"
+    return {
+        "status": mode,
+        "callback_url": (
+            f"{settings.public_base_url}/webhook/meta"
+            if settings.public_base_url
+            else None
+        ),
+        "public_base_url": settings.public_base_url,
+        "env_verify_token_configured": bool((settings.meta_webhook_verify_token or "").strip()),
+        "workspace_verify_token_configured": bool(workspace_tokens),
+        "resolved_verify_token_count": len(tokens),
+        "env_app_secret_configured": bool((settings.meta_app_secret or "").strip()),
+        "workspace_app_secret_configured": bool(workspace_secrets),
+        "resolved_app_secret_count": len(secrets),
+        "signature_validation_enabled": bool(secrets),
+        "verification_ready": bool(tokens),
     }
 
 
@@ -104,41 +190,34 @@ async def _handle_meta_webhook_post(
         finally:
             await redis.aclose()
 
-    if settings.meta_app_secret:
+    secrets = await _resolve_signature_secrets(session)
+    if secrets:
         signature = request.headers.get(
             "X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
         if not signature:
+            logger.warning("meta.webhook.signature.missing")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing X-Hub-Signature-256 header",
             )
-        if not meta_signature_valid(raw_body=raw_body, signature_header=signature):
+        if not any(
+            meta_signature_valid_with_secret(
+                raw_body=raw_body,
+                signature_header=signature,
+                secret=secret,
+            )
+            for secret in secrets
+        ):
+            logger.warning(
+                "meta.webhook.signature.invalid",
+                extra={"secret_candidates": len(secrets)},
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature",
             )
     else:
-        secrets = await list_all_app_secrets(session)
-        if secrets:
-            signature = request.headers.get(
-                "X-Hub-Signature-256") or request.headers.get("x-hub-signature-256")
-            if not signature:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Missing X-Hub-Signature-256 header",
-                )
-            if not any(
-                meta_signature_valid_with_secret(
-                    raw_body=raw_body,
-                    signature_header=signature,
-                    secret=secret,
-                )
-                for secret in secrets
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid webhook signature",
-                )
+        logger.info("meta.webhook.signature.skipped")
 
     try:
         payload = parse_json_object(raw_body)
@@ -172,9 +251,11 @@ async def verify_meta_webhook_alias(
     hub_verify_token: str | None = Query(
         default=None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
+    session: AsyncSession = Depends(get_db_session),
 ) -> PlainTextResponse:
     _ = webhook_id
-    challenge = meta_challenge_response(
+    challenge = await _verify_meta_challenge(
+        session=session,
         hub_mode=hub_mode,
         hub_verify_token=hub_verify_token,
         hub_challenge=hub_challenge,

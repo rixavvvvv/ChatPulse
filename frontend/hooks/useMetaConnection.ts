@@ -7,6 +7,8 @@ import {
     connectMeta,
     disconnectMeta,
     getMetaConnection,
+    getMetaWebhookDiagnostics,
+    MetaWebhookDiagnostics,
     rotateMetaToken,
     subscribeWebhook,
     syncMetaTemplates,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/services/meta";
 
 const META_QUERY_KEY = ["meta", "connection"] as const;
+const META_DIAGNOSTICS_QUERY_KEY = ["meta", "webhook-diagnostics"] as const;
 
 export function useMetaConnection() {
     const { socket } = useWebSocket();
@@ -41,6 +44,14 @@ export function useMetaConnection() {
     return useQuery<MetaConnectionResponse>({
         queryKey: META_QUERY_KEY,
         queryFn: () => getMetaConnection(),
+        refetchInterval: 30000,
+    });
+}
+
+export function useMetaWebhookDiagnostics() {
+    return useQuery<MetaWebhookDiagnostics>({
+        queryKey: META_DIAGNOSTICS_QUERY_KEY,
+        queryFn: () => getMetaWebhookDiagnostics(),
         refetchInterval: 30000,
     });
 }

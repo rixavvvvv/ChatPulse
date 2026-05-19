@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+import inspect
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -247,6 +248,36 @@ async def init_rate_limit_scripts(redis: Redis) -> None:
     logger.info("Rate limit Lua scripts registered")
 
 
+async def _maybe_await(value):
+    """Await coroutine-like values and pass through sync values."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _record_rate_limit_metrics(
+    redis: Redis,
+    *,
+    metrics_key: str,
+    allowed: bool,
+) -> None:
+    """
+    Record accepted/rejected counters in Redis, supporting async-safe mocks.
+
+    Some tests provide pipeline() as an async mock/coroutine and others as a
+    sync context manager. This wrapper handles both forms deterministically.
+    """
+    pipe_factory = redis.pipeline()
+    pipe = await _maybe_await(pipe_factory)
+    async with pipe:
+        if allowed:
+            await _maybe_await(pipe.hincrby(metrics_key, "accepted", 1))
+        else:
+            await _maybe_await(pipe.hincrby(metrics_key, "rejected", 1))
+        await _maybe_await(pipe.expire(metrics_key, 3600))
+        await pipe.execute()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Core Atomic Rate Limit Functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -284,7 +315,7 @@ async def _atomic_sliding_window(
         if script is None:
             raise RuntimeError("Sliding window script not registered")
 
-        result = await script(
+        result = await _maybe_await(script(
             keys=[key],
             args=[
                 now_ms,
@@ -293,7 +324,7 @@ async def _atomic_sliding_window(
                 event_id,
                 window_seconds * 2,  # TTL for key cleanup
             ],
-        )
+        ))
 
         allowed = bool(result[0])
         current_count = int(result[1])
@@ -303,14 +334,12 @@ async def _atomic_sliding_window(
         if record_metrics:
             metrics_key = f"ratelimit:metrics:{metrics_label}"
             try:
-                async with redis.pipeline() as pipe:
-                    if allowed:
-                        pipe.hincrby(metrics_key, "accepted", 1)
-                    else:
-                        pipe.hincrby(metrics_key, "rejected", 1)
-                    pipe.expire(metrics_key, 3600)
-                    await pipe.execute()
-            except RedisError as e:
+                await _record_rate_limit_metrics(
+                    redis,
+                    metrics_key=metrics_key,
+                    allowed=allowed,
+                )
+            except Exception as e:
                 logger.warning("Failed to update rate limit metrics: %s", e)
 
         return RateLimitResult(

@@ -103,8 +103,12 @@ export function useInboxSocket() {
         socket.on("conversation_assigned", onConversationUpdated);
         socket.on("message.received", onMessageEvent);
         socket.on("message.sent", onMessageEvent);
+        socket.on("message.status", onMessageEvent);
+        socket.on("message.updated", onMessageEvent);
         socket.on("message_received", onMessageEvent);
         socket.on("message_sent", onMessageEvent);
+        socket.on("message_status", onMessageEvent);
+        socket.on("message_updated", onMessageEvent);
 
         return () => {
             socket.off("reconnect_attempt", onReconnectAttempt);
@@ -124,8 +128,12 @@ export function useInboxSocket() {
             socket.off("conversation_assigned", onConversationUpdated);
             socket.off("message.received", onMessageEvent);
             socket.off("message.sent", onMessageEvent);
+            socket.off("message.status", onMessageEvent);
+            socket.off("message.updated", onMessageEvent);
             socket.off("message_received", onMessageEvent);
             socket.off("message_sent", onMessageEvent);
+            socket.off("message_status", onMessageEvent);
+            socket.off("message_updated", onMessageEvent);
         };
     }, [socket, queryClient, addTyping, removeTyping, setPresence, setUnread, setConnection]);
 }

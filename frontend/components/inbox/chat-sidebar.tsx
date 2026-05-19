@@ -9,7 +9,9 @@ interface ChatSidebarProps {
     conversations: ConversationListItem[];
     selectedId: number | null;
     unreadByConversation: Record<number, number>;
+    pinnedIds: number[];
     onSelect: (conversationId: number) => void;
+    onTogglePin: (conversationId: number) => void;
     search: string;
     onSearchChange: (value: string) => void;
     filters: {
@@ -26,7 +28,9 @@ export function ChatSidebar({
     conversations,
     selectedId,
     unreadByConversation,
+    pinnedIds,
     onSelect,
+    onTogglePin,
     search,
     onSearchChange,
     filters,
@@ -54,7 +58,7 @@ export function ChatSidebar({
     }, [hasNextPage, isLoading, onLoadMore]);
 
     return (
-        <aside className="w-full md:w-[360px] border-r border-gray-200 dark:border-gray-800 flex flex-col">
+        <aside className="w-full md:w-[360px] border-r border-gray-200 dark:border-gray-800 flex flex-col bg-white dark:bg-gray-950">
             <div className="p-4 border-b border-gray-200 dark:border-gray-800">
                 <div className="relative">
                     <Search className="absolute left-3 top-3 text-gray-400" size={18} />
@@ -104,19 +108,47 @@ export function ChatSidebar({
             <div
                 ref={containerRef}
                 className={cn(
-                    "flex-1 overflow-y-auto p-3 space-y-3",
+                    "flex-1 overflow-y-auto p-3 space-y-4",
                     isLoading && "opacity-70"
                 )}
             >
-                {conversations.map((conversation) => (
-                    <ConversationCard
-                        key={conversation.id}
-                        conversation={conversation}
-                        isActive={selectedId === conversation.id}
-                        unreadCount={unreadByConversation[conversation.id]}
-                        onSelect={onSelect}
-                    />
-                ))}
+                {pinnedIds.length > 0 && (
+                    <div className="space-y-3">
+                        <p className="text-xs font-semibold uppercase text-gray-400">Pinned</p>
+                        {conversations
+                            .filter((conversation) => pinnedIds.includes(conversation.id))
+                            .map((conversation) => (
+                                <ConversationCard
+                                    key={conversation.id}
+                                    conversation={conversation}
+                                    isActive={selectedId === conversation.id}
+                                    unreadCount={unreadByConversation[conversation.id]}
+                                    onSelect={onSelect}
+                                    onTogglePin={onTogglePin}
+                                    isPinned
+                                />
+                            ))}
+                    </div>
+                )}
+
+                <div className="space-y-3">
+                    {pinnedIds.length > 0 && (
+                        <p className="text-xs font-semibold uppercase text-gray-400">All conversations</p>
+                    )}
+                    {conversations
+                        .filter((conversation) => !pinnedIds.includes(conversation.id))
+                        .map((conversation) => (
+                            <ConversationCard
+                                key={conversation.id}
+                                conversation={conversation}
+                                isActive={selectedId === conversation.id}
+                                unreadCount={unreadByConversation[conversation.id]}
+                                onSelect={onSelect}
+                                onTogglePin={onTogglePin}
+                                isPinned={false}
+                            />
+                        ))}
+                </div>
                 {isLoading && (
                     <p className="text-center text-sm text-gray-500">Loading conversations...</p>
                 )}

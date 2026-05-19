@@ -44,6 +44,16 @@ from app.models.campaign_contact import (
 )
 from app.queue.registry import TASKS
 
+try:
+    from app.queue.celery_app import celery_app
+except Exception:  # pragma: no cover - allows isolated unit tests
+    celery_app = None
+
+try:
+    from app.queue.tasks import process_campaign_send_task
+except Exception:  # pragma: no cover - allows isolated unit tests
+    process_campaign_send_task = None
+
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -266,7 +276,15 @@ async def record_campaign_heartbeat(
     }
 
     import json
-    await redis.set(key, json.dumps(data), ex=ttl_seconds)
+    try:
+        await redis.set(key, json.dumps(data), ex=ttl_seconds)
+    except Exception as exc:
+        logger.warning(
+            "Failed to record campaign heartbeat campaign_id=%s task_id=%s error=%s",
+            campaign_id,
+            task_id,
+            exc,
+        )
 
 
 async def get_campaign_heartbeat(redis: Redis, campaign_id: int) -> dict[str, Any] | None:
@@ -316,8 +334,6 @@ async def detect_stalled_campaigns(
     2. No heartbeat received within stale_threshold_seconds
     3. Celery task is no longer active
     """
-    from app.queue.celery_app import celery_app
-
     now = datetime.now(tz=UTC)
     stale_threshold = timedelta(seconds=stale_threshold_seconds)
     cutoff_time = now - stale_threshold
@@ -344,7 +360,7 @@ async def detect_stalled_campaigns(
 
             if task_id:
                 try:
-                    inspector = celery_app.control.inspect(timeout=1.0)
+                    inspector = celery_app.control.inspect(timeout=1.0) if celery_app else None
                     if inspector:
                         active_tasks = inspector.active()
                         if active_tasks:
@@ -412,6 +428,7 @@ async def mark_campaign_recovering(
             last_recovered_at=datetime.now(tz=UTC),
         )
     )
+    await session.commit()
 
 
 # ============================================================================
@@ -434,8 +451,6 @@ async def recover_stalled_campaign(
     4. Requeue campaign send task
     5. Return recovery summary
     """
-    from app.queue.tasks import process_campaign_send_task
-
     campaign_id = recovery_context.campaign_id
 
     # Try to acquire recovery lock (prevents concurrent recovery attempts)
@@ -481,6 +496,9 @@ async def recover_stalled_campaign(
         await redis.delete(_heartbeat_key(campaign_id))
 
         # Requeue campaign send task
+        if process_campaign_send_task is None:
+            raise CampaignRecoveryError(campaign_id, "Campaign task not available")
+
         task = process_campaign_send_task.delay(
             workspace_id=recovery_context.workspace_id,
             campaign_id=campaign_id,
@@ -573,7 +591,10 @@ async def _reset_pending_recipients(
         )
     )
     result = await session.execute(stmt)
-    return result.rowcount
+    raw_rowcount = getattr(result, "rowcount", 0)
+    if type(raw_rowcount) is int:
+        return raw_rowcount
+    return 0
 
 
 # ============================================================================

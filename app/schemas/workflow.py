@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class WorkflowStatus(str, Enum):
@@ -71,6 +71,18 @@ class WorkflowNodeCreate(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     position: NodePosition = Field(default_factory=NodePosition)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_frontend_payload(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        if "node_id" not in normalized and "id" in normalized:
+            normalized["node_id"] = normalized["id"]
+        if "node_type" not in normalized and "type" in normalized:
+            normalized["node_type"] = normalized["type"]
+        return normalized
+
 
 class WorkflowNodeUpdate(BaseModel):
     name: str | None = None
@@ -98,6 +110,20 @@ class WorkflowEdgeCreate(BaseModel):
     source_node_id: str = Field(..., max_length=64)
     target_node_id: str = Field(..., max_length=64)
     condition: str | None = Field(None, max_length=512)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_frontend_payload(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        if "edge_id" not in normalized and "id" in normalized:
+            normalized["edge_id"] = normalized["id"]
+        if "source_node_id" not in normalized and "source" in normalized:
+            normalized["source_node_id"] = normalized["source"]
+        if "target_node_id" not in normalized and "target" in normalized:
+            normalized["target_node_id"] = normalized["target"]
+        return normalized
 
 
 class WorkflowEdgeResponse(BaseModel):

@@ -2,13 +2,13 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "🚀 Starting ChatPulse Development Environment..." -ForegroundColor Green
+Write-Host "Starting ChatPulse Development Environment..." -ForegroundColor Green
 
 # Check if Docker is running
 try {
     docker info 2>&1 | Out-Null
 } catch {
-    Write-Host "❌ Docker is not running. Please start Docker first." -ForegroundColor Red
+    Write-Host "Docker is not running. Please start Docker first." -ForegroundColor Red
     exit 1
 }
 
@@ -16,19 +16,19 @@ try {
 try {
     docker compose version 2>&1 | Out-Null
 } catch {
-    Write-Host "❌ Docker Compose is not available. Please install Docker Compose." -ForegroundColor Red
+    Write-Host "Docker Compose is not available. Please install Docker Compose." -ForegroundColor Red
     exit 1
 }
 
 # Build and start services
-Write-Host "📦 Building and starting services..." -ForegroundColor Yellow
+Write-Host "Building and starting services..." -ForegroundColor Yellow
 docker compose build
 
-Write-Host "▶️  Starting all services..." -ForegroundColor Yellow
+Write-Host "Starting all services..." -ForegroundColor Yellow
 docker compose up -d
 
 # Wait for services to be healthy
-Write-Host "⏳ Waiting for services to be ready..." -ForegroundColor Yellow
+Write-Host "Waiting for services to be ready..." -ForegroundColor Yellow
 
 # Wait for PostgreSQL
 Write-Host "  - Waiting for PostgreSQL..." -ForegroundColor Gray
@@ -44,9 +44,9 @@ while (-not $postgresReady -and $attempts -lt 30) {
     }
 }
 if ($postgresReady) {
-    Write-Host "  ✅ PostgreSQL is ready" -ForegroundColor Green
+    Write-Host "  PostgreSQL is ready" -ForegroundColor Green
 } else {
-    Write-Host "  ❌ PostgreSQL failed to start" -ForegroundColor Red
+    Write-Host "  PostgreSQL failed to start" -ForegroundColor Red
 }
 
 # Wait for Redis
@@ -63,9 +63,9 @@ while (-not $redisReady -and $attempts -lt 15) {
     }
 }
 if ($redisReady) {
-    Write-Host "  ✅ Redis is ready" -ForegroundColor Green
+    Write-Host "  Redis is ready" -ForegroundColor Green
 } else {
-    Write-Host "  ❌ Redis failed to start" -ForegroundColor Red
+    Write-Host "  Redis failed to start" -ForegroundColor Red
 }
 
 # Wait for backend
@@ -84,9 +84,9 @@ while (-not $backendReady -and $attempts -lt 30) {
     }
 }
 if ($backendReady) {
-    Write-Host "  ✅ Backend is ready" -ForegroundColor Green
+    Write-Host "  Backend is ready" -ForegroundColor Green
 } else {
-    Write-Host "  ⚠️  Backend may not be ready yet (this is okay if it's still starting)" -ForegroundColor Yellow
+    Write-Host "  Backend may not be ready yet (still starting)" -ForegroundColor Yellow
 }
 
 # Wait for frontend
@@ -105,9 +105,9 @@ while (-not $frontendReady -and $attempts -lt 30) {
     }
 }
 if ($frontendReady) {
-    Write-Host "  ✅ Frontend is ready" -ForegroundColor Green
+    Write-Host "  Frontend is ready" -ForegroundColor Green
 } else {
-    Write-Host "  ⚠️  Frontend may not be ready yet (this is okay if it's still starting)" -ForegroundColor Yellow
+    Write-Host "  Frontend may not be ready yet (still starting)" -ForegroundColor Yellow
 }
 
 Write-Host ""

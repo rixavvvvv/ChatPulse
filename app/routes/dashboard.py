@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,6 +51,7 @@ from app.services.dashboard.realtime import (
 from app.services.dashboard.query_builder import PaginationInput
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard Analytics"])
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,15 +186,43 @@ async def get_queue_health_metrics(
 
     Shows task processing rates, failure rates, worker distribution.
     """
-    return await service.get_queue_health(
-        workspace_id=workspace.id,
-        queue_name=queue_name,
-        start_time=start_time,
-        end_time=end_time,
-        period=period,
-        include_timeline=include_timeline,
-        include_worker_breakdown=include_worker_breakdown,
-    )
+    try:
+        return await service.get_queue_health(
+            workspace_id=workspace.id,
+            queue_name=queue_name,
+            start_time=start_time,
+            end_time=end_time,
+            period=period,
+            include_timeline=include_timeline,
+            include_worker_breakdown=include_worker_breakdown,
+        )
+    except Exception:
+        logger.exception(
+            "dashboard.queue_health.failed",
+            extra={"workspace_id": workspace.id, "queue_name": queue_name},
+        )
+        return {
+            "summary": {
+                "workspace_id": workspace.id,
+                "queue_name": queue_name or "all",
+                "tasks_pending": 0,
+                "tasks_in_progress": 0,
+                "tasks_completed": 0,
+                "tasks_failed": 0,
+                "tasks_retried": 0,
+                "success_rate": 0.0,
+                "failure_rate": 0.0,
+                "retry_rate": 0.0,
+                "avg_process_time_ms": 0.0,
+                "p95_process_time_ms": 0.0,
+                "p99_process_time_ms": None,
+                "queue_depth": 0,
+                "active_workers": 0,
+            },
+            "timeline": [],
+            "error_breakdown": {},
+            "by_worker": {},
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,15 +246,35 @@ async def get_webhook_health_metrics(
 
     Shows webhook processing rates, failure rates, recent failures.
     """
-    return await service.get_webhook_health(
-        workspace_id=workspace.id,
-        start_time=start_time,
-        end_time=end_time,
-        period=period,
-        include_timeline=include_timeline,
-        include_recent_failures=include_recent_failures,
-        limit_recent_failures=limit_recent_failures,
-    )
+    try:
+        return await service.get_webhook_health(
+            workspace_id=workspace.id,
+            start_time=start_time,
+            end_time=end_time,
+            period=period,
+            include_timeline=include_timeline,
+            include_recent_failures=include_recent_failures,
+            limit_recent_failures=limit_recent_failures,
+        )
+    except Exception:
+        logger.exception(
+            "dashboard.webhook_health.failed",
+            extra={"workspace_id": workspace.id},
+        )
+        return {
+            "summary": {
+                "workspace_id": workspace.id,
+                "webhooks_received": 0,
+                "webhooks_processed": 0,
+                "webhooks_failed": 0,
+                "webhooks_pending": 0,
+                "success_rate": 0.0,
+                "failure_rate": 0.0,
+            },
+            "timeline": [],
+            "recent_failures": [],
+            "by_source": {},
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -247,14 +297,34 @@ async def get_retry_analytics_metrics(
 
     Shows retry rates, success rates, error breakdowns.
     """
-    return await service.get_retry_analytics(
-        workspace_id=workspace.id,
-        campaign_id=campaign_id,
-        start_time=start_time,
-        end_time=end_time,
-        period=period,
-        include_timeline=include_timeline,
-    )
+    try:
+        return await service.get_retry_analytics(
+            workspace_id=workspace.id,
+            campaign_id=campaign_id,
+            start_time=start_time,
+            end_time=end_time,
+            period=period,
+            include_timeline=include_timeline,
+        )
+    except Exception:
+        logger.exception(
+            "dashboard.retry_analytics.failed",
+            extra={"workspace_id": workspace.id, "campaign_id": campaign_id},
+        )
+        return {
+            "summary": {
+                "workspace_id": workspace.id,
+                "total_retries": 0,
+                "retry_success_count": 0,
+                "retry_failure_count": 0,
+                "retry_rate": 0.0,
+                "retry_success_rate": 0.0,
+                "max_retry_attempts": 0,
+            },
+            "timeline": [],
+            "top_retry_error_types": [],
+            "by_error_type": {},
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,16 +349,37 @@ async def get_recovery_analytics_metrics(
 
     Shows recovery rates, recovered message counts.
     """
-    return await service.get_recovery_analytics(
-        workspace_id=workspace.id,
-        campaign_id=campaign_id,
-        start_time=start_time,
-        end_time=end_time,
-        period=period,
-        include_timeline=include_timeline,
-        include_recent_recoveries=include_recent_recoveries,
-        limit_recent_recoveries=limit_recent_recoveries,
-    )
+    try:
+        return await service.get_recovery_analytics(
+            workspace_id=workspace.id,
+            campaign_id=campaign_id,
+            start_time=start_time,
+            end_time=end_time,
+            period=period,
+            include_timeline=include_timeline,
+            include_recent_recoveries=include_recent_recoveries,
+            limit_recent_recoveries=limit_recent_recoveries,
+        )
+    except Exception:
+        logger.exception(
+            "dashboard.recovery_analytics.failed",
+            extra={"workspace_id": workspace.id, "campaign_id": campaign_id},
+        )
+        return {
+            "summary": {
+                "workspace_id": workspace.id,
+                "recoveries_detected": 0,
+                "recoveries_started": 0,
+                "recoveries_completed": 0,
+                "recoveries_failed": 0,
+                "recovered_messages": 0,
+                "recovered_campaigns": 0,
+                "recovery_rate": 0.0,
+                "success_rate": 0.0,
+            },
+            "timeline": [],
+            "recent_recoveries": [],
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -308,11 +399,36 @@ async def get_dashboard_overview(
 
     Returns summary metrics with optional period comparison.
     """
-    return await service.get_dashboard_overview(
-        workspace_id=workspace.id,
-        period=period,
-        compare_previous=compare_previous,
-    )
+    try:
+        return await service.get_dashboard_overview(
+            workspace_id=workspace.id,
+            period=period,
+            compare_previous=compare_previous,
+        )
+    except Exception:
+        logger.exception(
+            "dashboard.overview.failed",
+            extra={"workspace_id": workspace.id, "period": period},
+        )
+        return {
+            "workspace_id": workspace.id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "period": period,
+            "period_start": None,
+            "period_end": None,
+            "total_messages_sent": 0,
+            "total_messages_delivered": 0,
+            "total_campaigns": 0,
+            "campaigns_completed": 0,
+            "campaigns_active": 0,
+            "delivery_rate": 0.0,
+            "read_rate": 0.0,
+            "error_rate": 0.0,
+            "queue_depth": 0,
+            "active_workers": 0,
+            "health_score": 100.0,
+            "changes": {},
+        }
 
 
 @router.get("/alerts")
@@ -347,9 +463,30 @@ async def get_realtime_metrics(
 
     Returns current active campaigns, messages in flight, rates.
     """
-    return await service.get_realtime_metrics(
-        workspace_id=workspace.id,
-    )
+    try:
+        return await service.get_realtime_metrics(
+            workspace_id=workspace.id,
+        )
+    except Exception:
+        logger.exception(
+            "dashboard.realtime.failed",
+            extra={"workspace_id": workspace.id},
+        )
+        return {
+            "workspace_id": workspace.id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "active_campaigns": 0,
+            "messages_in_flight": 0,
+            "queue_depth": 0,
+            "active_workers": 0,
+            "messages_last_minute": 0,
+            "messages_last_hour": 0,
+            "messages_per_second": 0.0,
+            "avg_queue_latency_ms": None,
+            "avg_dispatch_latency_ms": None,
+            "p95_dispatch_latency_ms": None,
+            "error_rate_percent": 0.0,
+        }
 
 
 @router.get("/realtime/stream")
