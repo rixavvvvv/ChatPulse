@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.db import init_db
+from app.bootstrap.service import ensure_bootstrap_admin
+from app.db import AsyncSessionLocal, init_db
 from app.routes import api_router
 
 settings = get_settings()
@@ -14,6 +15,8 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Lifecycle hooks for startup and shutdown tasks."""
     await init_db()
+    async with AsyncSessionLocal() as session:
+        await ensure_bootstrap_admin(session)
     yield
     # Shutdown actions can be added here.
 

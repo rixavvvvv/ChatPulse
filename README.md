@@ -193,3 +193,17 @@ Usage tracking is incremented automatically whenever a `sent` message event is r
 
 - Database configuration uses `DATABASE_URL` and is ready for async PostgreSQL via `asyncpg`.
 - CORS origins are controlled by `CORS_ORIGINS` as a comma-separated list.
+
+Bakcne=> 
+
+Set-Location "D:\On-going Projects\Bulk Messaging"
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+
+forntend=>
+
+Set-Location "D:\On-going Projects\Bulk Messaging\frontend"
+npm install
+npm run dev

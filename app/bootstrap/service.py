@@ -2,27 +2,26 @@
 
 from datetime import UTC, datetime, timedelta
 import logging
-import hashlib
 import random
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
+from app.core.config import get_settings
+from app.models.user import User, UserRole
 from app.models.workspace import Workspace
 from app.models.contact import Contact
-from app.models.tag import Tag
 from app.models.contact_intelligence import (
     Segment,
-    ContactAttribute,
+    ContactAttributeValue,
     AttributeDefinition,
     ContactActivity,
+    Tag,
 )
 from app.models.template import Template, TemplateStatus
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.workflow import WorkflowDefinition
-from app.models.analytics import DailyAnalytics
 
 from app.bootstrap.seed_data import (
     DEMO_WORKSPACE,
@@ -35,10 +34,10 @@ from app.bootstrap.seed_data import (
     DEMO_CAMPAIGNS,
     DEMO_CONVERSATIONS,
     DEMO_WORKFLOWS,
-    generate_demo_analytics,
 )
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class BootstrapService:
@@ -48,6 +47,7 @@ class BootstrapService:
         self.session = session
         self.workspace_id: int | None = None
         self.user_id: int | None = None
+        self.attribute_definition_map: dict[str, int] = {}
 
     async def bootstrap(self, reset: bool = False) -> dict[str, int]:
         """Run the full bootstrap process."""
@@ -60,7 +60,8 @@ class BootstrapService:
         # Create workspace
         workspace = await self._create_workspace()
         self.workspace_id = workspace.id
-        logger.info(f"Created workspace: {workspace.name} (ID: {workspace.id})")
+        logger.info(
+            f"Created workspace: {workspace.name} (ID: {workspace.id})")
 
         # Create user
         user = await self._create_user(workspace.id)
@@ -97,12 +98,10 @@ class BootstrapService:
 
         # Create conversations and messages
         conv_count, msg_count = await self._create_conversations(contacts)
-        logger.info(f"Created {conv_count} conversations with {msg_count} messages")
+        logger.info(
+            f"Created {conv_count} conversations with {msg_count} messages")
 
         # Create analytics
-        await self._create_analytics()
-        logger.info("Created analytics data")
-
         # Create contact activities
         await self._create_activities(contacts)
         logger.info("Created contact activities")
@@ -119,7 +118,7 @@ class BootstrapService:
             "workflows": len(workflows),
             "conversations": conv_count,
             "messages": msg_count,
-            "analytics_days": 30,
+            "analytics_days": 0,
         }
 
         logger.info(f"Bootstrap complete: {stats}")
@@ -127,14 +126,13 @@ class BootstrapService:
 
     async def reset_data(self) -> None:
         """Reset all demo data (keep structure)."""
-        await self.session.execute(delete(DailyAnalytics))
         await self.session.execute(delete(ConversationMessage))
         await self.session.execute(delete(Conversation))
         await self.session.execute(delete(WorkflowDefinition))
         await self.session.execute(delete(Campaign))
         await self.session.execute(delete(Template))
         await self.session.execute(delete(Segment))
-        await self.session.execute(delete(ContactAttribute))
+        await self.session.execute(delete(ContactAttributeValue))
         await self.session.execute(delete(AttributeDefinition))
         await self.session.execute(delete(ContactActivity))
         await self.session.execute(delete(Contact))
@@ -157,32 +155,30 @@ class BootstrapService:
 
     async def _create_user(self, workspace_id: int) -> User:
         """Create the demo user."""
-        # Hash the password
-        password_hash = hashlib.sha256(DEMO_USER["password"].encode()).hexdigest()
+        from app.models.membership import Membership, MembershipRole
+        from app.services.auth_service import hash_password
+
+        role = UserRole.user
+        if DEMO_USER.get("role") == "admin":
+            role = UserRole.super_admin
 
         user = User(
             email=DEMO_USER["email"],
-            password=password_hash,
-            full_name=DEMO_USER["full_name"],
-            role=DEMO_USER["role"],
+            password_hash=hash_password(DEMO_USER["password"]),
+            role=role.value,
             is_active=True,
             subscription_plan="free",
-            workspace_id=workspace_id,
             created_at=datetime.now(UTC),
         )
         self.session.add(user)
         await self.session.flush()
 
-        # Create workspace membership
-        from app.models.membership import WorkspaceMember, MembershipRole
-        member = WorkspaceMember(
+        membership = Membership(
             user_id=user.id,
             workspace_id=workspace_id,
-            role=MembershipRole.OWNER,
-            invited_by=user.id,
-            joined_at=datetime.now(UTC),
+            role=MembershipRole.admin,
         )
-        self.session.add(member)
+        self.session.add(membership)
         await self.session.commit()
         return user
 
@@ -214,6 +210,9 @@ class BootstrapService:
             self.session.add(attr)
             definitions.append(attr)
         await self.session.flush()
+        self.attribute_definition_map = {
+            definition.key: definition.id for definition in definitions
+        }
         return definitions
 
     async def _create_contacts(self) -> list[Contact]:
@@ -228,8 +227,10 @@ class BootstrapService:
                 phone=contact_data["phone"],
                 tags=contact_data["tags"],
                 status="active",
-                created_at=datetime.now(UTC) - timedelta(days=random.randint(1, 60)),
-                last_activity_at=datetime.now(UTC) - timedelta(days=random.randint(0, 7)),
+                created_at=datetime.now(
+                    UTC) - timedelta(days=random.randint(1, 60)),
+                last_activity_at=datetime.now(
+                    UTC) - timedelta(days=random.randint(0, 7)),
             )
             self.session.add(contact)
             contacts.append(contact)
@@ -239,35 +240,44 @@ class BootstrapService:
 
         # Create contact attributes
         for contact in contacts:
-            company = random.choice(["Acme Corp", "TechStart", "GlobalInc", "SmallBiz", "Enterprise Co", None])
+            company = random.choice(
+                ["Acme Corp", "TechStart", "GlobalInc", "SmallBiz", "Enterprise Co", None])
             if company:
-                attr = ContactAttribute(
-                    workspace_id=self.workspace_id,
-                    contact_id=contact.id,
-                    key="company",
-                    value=company,
-                )
-                self.session.add(attr)
+                definition_id = self.attribute_definition_map.get("company")
+                if definition_id:
+                    attr = ContactAttributeValue(
+                        workspace_id=self.workspace_id,
+                        contact_id=contact.id,
+                        attribute_definition_id=definition_id,
+                        value_text=company,
+                    )
+                    self.session.add(attr)
 
-            employees = random.randint(1, 1000) if random.random() > 0.3 else None
+            employees = random.randint(
+                1, 1000) if random.random() > 0.3 else None
             if employees:
-                attr = ContactAttribute(
-                    workspace_id=self.workspace_id,
-                    contact_id=contact.id,
-                    key="employees",
-                    value=employees,
-                )
-                self.session.add(attr)
+                definition_id = self.attribute_definition_map.get("employees")
+                if definition_id:
+                    attr = ContactAttributeValue(
+                        workspace_id=self.workspace_id,
+                        contact_id=contact.id,
+                        attribute_definition_id=definition_id,
+                        value_number=employees,
+                    )
+                    self.session.add(attr)
 
             is_enterprise = random.random() > 0.8
             if is_enterprise:
-                attr = ContactAttribute(
-                    workspace_id=self.workspace_id,
-                    contact_id=contact.id,
-                    key="is_enterprise",
-                    value=True,
-                )
-                self.session.add(attr)
+                definition_id = self.attribute_definition_map.get(
+                    "is_enterprise")
+                if definition_id:
+                    attr = ContactAttributeValue(
+                        workspace_id=self.workspace_id,
+                        contact_id=contact.id,
+                        attribute_definition_id=definition_id,
+                        value_bool=True,
+                    )
+                    self.session.add(attr)
 
         await self.session.commit()
         return contacts
@@ -282,7 +292,8 @@ class BootstrapService:
                 definition=seg_data["definition"],
                 status="active",
                 approx_size=random.randint(10, 25),
-                last_materialized_at=datetime.now(UTC) - timedelta(days=random.randint(0, 3)),
+                last_materialized_at=datetime.now(
+                    UTC) - timedelta(days=random.randint(0, 3)),
             )
             self.session.add(segment)
             segments.append(segment)
@@ -387,7 +398,8 @@ class BootstrapService:
 
             # Create conversation
             first_msg = messages[0]
-            direction = MessageDirection.INBOUND if first_msg["direction"] == "inbound" else MessageDirection.OUTBOUND
+            direction = MessageDirection.INBOUND if first_msg[
+                "direction"] == "inbound" else MessageDirection.OUTBOUND
 
             conversation = Conversation(
                 workspace_id=self.workspace_id,
@@ -396,7 +408,8 @@ class BootstrapService:
                 status=ConversationStatus.OPEN,
                 priority="normal",
                 direction=direction,
-                last_message_at=datetime.now(UTC) - timedelta(minutes=random.randint(1, 60)),
+                last_message_at=datetime.now(
+                    UTC) - timedelta(minutes=random.randint(1, 60)),
             )
             self.session.add(conversation)
             await self.session.flush()
@@ -405,8 +418,10 @@ class BootstrapService:
             # Create messages
             msg_time = datetime.now(UTC) - timedelta(minutes=len(messages) * 5)
             for msg_data in messages:
-                direction = MessageDirection.INBOUND if msg_data["direction"] == "inbound" else MessageDirection.OUTBOUND
-                sender_type = MessageSenderType.CONTACT if msg_data["direction"] == "inbound" else MessageSenderType.AGENT
+                direction = MessageDirection.INBOUND if msg_data[
+                    "direction"] == "inbound" else MessageDirection.OUTBOUND
+                sender_type = MessageSenderType.CONTACT if msg_data[
+                    "direction"] == "inbound" else MessageSenderType.AGENT
 
                 message = ConversationMessage(
                     conversation_id=conversation.id,
@@ -424,26 +439,6 @@ class BootstrapService:
 
         await self.session.commit()
         return conv_count, msg_count
-
-    async def _create_analytics(self) -> None:
-        """Create demo analytics data."""
-        analytics_data = generate_demo_analytics()
-        for data in analytics_data:
-            analytics = DailyAnalytics(
-                workspace_id=self.workspace_id,
-                date=datetime.fromisoformat(data["date"]).date(),
-                messages_sent=data["messages_sent"],
-                messages_delivered=data["messages_delivered"],
-                messages_read=data["messages_read"],
-                messages_replied=data["messages_replied"],
-                new_contacts=data["new_contacts"],
-                active_contacts=data["active_contacts"],
-                conversations=data["conversations"],
-                campaigns_sent=data["campaigns_sent"],
-                revenue=data["revenue"],
-            )
-            self.session.add(analytics)
-        await self.session.commit()
 
     async def _create_activities(self, contacts: list[Contact]) -> None:
         """Create demo contact activities."""
@@ -465,7 +460,8 @@ class BootstrapService:
                     type=random.choice(activity_types),
                     payload={"source": "bootstrap"},
                     actor_user_id=self.user_id,
-                    created_at=datetime.now(UTC) - timedelta(days=random.randint(0, 30)),
+                    created_at=datetime.now(
+                        UTC) - timedelta(days=random.randint(0, 30)),
                 )
                 self.session.add(activity)
 
@@ -476,3 +472,45 @@ async def run_bootstrap(session: AsyncSession, reset: bool = False) -> dict[str,
     """Run the bootstrap process."""
     bootstrapper = BootstrapService(session)
     return await bootstrapper.bootstrap(reset=reset)
+
+
+async def ensure_bootstrap_admin(session: AsyncSession) -> User | None:
+    """Ensure a bootstrap admin user exists for local development."""
+    if not settings.bootstrap_admin_email or not settings.bootstrap_admin_password:
+        return None
+
+    from app.services.auth_service import hash_password
+    from app.services.user_service import create_user, get_user_by_email
+    from app.services.workspace_service import (
+        build_default_workspace_name,
+        create_workspace_with_owner_membership,
+    )
+    from app.services.subscription_service import get_plan_by_name, upsert_user_subscription
+
+    existing = await get_user_by_email(session, settings.bootstrap_admin_email)
+    if existing:
+        return existing
+
+    user = await create_user(
+        session=session,
+        email=settings.bootstrap_admin_email,
+        password_hash=hash_password(settings.bootstrap_admin_password),
+        role=UserRole.super_admin,
+        subscription_plan="free",
+        is_active=True,
+    )
+    await create_workspace_with_owner_membership(
+        session=session,
+        name=build_default_workspace_name(user.email),
+        owner_id=user.id,
+    )
+
+    plan = await get_plan_by_name(session=session, name="free")
+    if plan is not None:
+        await upsert_user_subscription(
+            session=session,
+            user_id=user.id,
+            plan_id=plan.id,
+        )
+
+    return user

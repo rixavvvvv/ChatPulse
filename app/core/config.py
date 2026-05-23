@@ -21,6 +21,14 @@ class Settings(BaseSettings):
         default=None,
         alias="SUPER_ADMIN_EMAIL",
     )
+    bootstrap_admin_email: str | None = Field(
+        default=None,
+        alias="BOOTSTRAP_ADMIN_EMAIL",
+    )
+    bootstrap_admin_password: str | None = Field(
+        default=None,
+        alias="BOOTSTRAP_ADMIN_PASSWORD",
+    )
     whatsapp_provider: str = Field(
         default="simulation", alias="WHATSAPP_PROVIDER")
     whatsapp_phone_number_id: str | None = Field(
@@ -167,7 +175,7 @@ class Settings(BaseSettings):
         alias="DATABASE_USE_NULL_POOL",
     )
     cors_origins_raw: str = Field(
-        default="http://localhost:3000",
+        default="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
         alias="CORS_ORIGINS",
     )
 
@@ -202,6 +210,26 @@ class Settings(BaseSettings):
         if not normalized:
             return None
         return normalized
+
+    @field_validator("bootstrap_admin_email")
+    @classmethod
+    def validate_bootstrap_admin_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        return normalized
+
+    @field_validator("bootstrap_admin_password")
+    @classmethod
+    def validate_bootstrap_admin_password(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if len(value.strip()) < 8:
+            raise ValueError(
+                "BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters")
+        return value
 
     @field_validator("whatsapp_default_calling_code")
     @classmethod

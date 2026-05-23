@@ -238,6 +238,16 @@ export default function MetaIntegrationPage() {
                 </MetaStatusCard>
             </div>
 
+            {health?.reasons?.length ? (
+                <MetaStatusCard title="Connection Issues" description="Meta API errors reported by the backend">
+                    <div className="space-y-1 text-xs text-rose-600">
+                        {health.reasons.map((reason, index) => (
+                            <div key={`${reason}-${index}`}>{reason}</div>
+                        ))}
+                    </div>
+                </MetaStatusCard>
+            ) : null}
+
             <MetaStatusCard title="Webhook Diagnostics" description="Verification and signature resolution">
                 {diagnosticsQuery.isLoading ? (
                     <div className="text-xs text-muted-foreground">Loading diagnostics...</div>

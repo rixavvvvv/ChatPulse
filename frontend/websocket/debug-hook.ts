@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useCallback, useEffect } from "react";
-import { Socket } from "socket.io-client";
+import type { WebSocketClient } from "@/websocket/provider";
 
 export interface WebSocketEvent {
     id: string;
@@ -22,7 +22,7 @@ export interface WebSocketDebugState {
 }
 
 interface UseWebSocketDebugOptions {
-    socket: Socket | null;
+    socket: WebSocketClient | null;
     enabled?: boolean;
 }
 
