@@ -13,18 +13,6 @@ from app.models.meta_credential import MetaCredential
 settings = get_settings()
 
 
-async def _ensure_meta_credentials_columns(session: AsyncSession) -> None:
-    """Best-effort runtime schema guard for older databases."""
-    await session.execute(
-        text("ALTER TABLE meta_credentials ADD COLUMN IF NOT EXISTS app_secret TEXT")
-    )
-    await session.execute(
-        text("ALTER TABLE meta_credentials ADD COLUMN IF NOT EXISTS webhook_verify_token TEXT")
-    )
-    await session.execute(
-        text("ALTER TABLE meta_credentials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
-    )
-    await session.commit()
 
 
 @dataclass(frozen=True)
@@ -45,7 +33,7 @@ async def upsert_workspace_meta_credential(
     app_secret: str | None = None,
     webhook_verify_token: str | None = None,
 ) -> MetaCredential:
-    await _ensure_meta_credentials_columns(session)
+
     stmt = select(MetaCredential).where(
         MetaCredential.workspace_id == workspace_id)
     existing = (await session.execute(stmt)).scalar_one_or_none()
@@ -86,7 +74,7 @@ async def get_workspace_meta_credential_summary(
     session: AsyncSession,
     workspace_id: int,
 ) -> MetaCredential | None:
-    await _ensure_meta_credentials_columns(session)
+
     stmt = select(MetaCredential).where(
         MetaCredential.workspace_id == workspace_id)
     result = await session.execute(stmt)
@@ -97,7 +85,7 @@ async def get_workspace_meta_credentials(
     workspace_id: int,
 ) -> WorkspaceMetaCredentials | None:
     async with AsyncSessionLocal() as session:
-        await _ensure_meta_credentials_columns(session)
+
         stmt = select(MetaCredential).where(
             MetaCredential.workspace_id == workspace_id)
         record = (await session.execute(stmt)).scalar_one_or_none()
@@ -123,7 +111,7 @@ async def get_workspace_meta_credential_flags(
     session: AsyncSession,
     workspace_id: int,
 ) -> dict[str, bool | str | None]:
-    await _ensure_meta_credentials_columns(session)
+
     stmt = select(MetaCredential).where(
         MetaCredential.workspace_id == workspace_id)
     record = (await session.execute(stmt)).scalar_one_or_none()
@@ -151,7 +139,7 @@ async def clear_workspace_meta_credentials(
     session: AsyncSession,
     workspace_id: int,
 ) -> None:
-    await _ensure_meta_credentials_columns(session)
+
     stmt = select(MetaCredential).where(
         MetaCredential.workspace_id == workspace_id)
     record = (await session.execute(stmt)).scalar_one_or_none()
@@ -164,7 +152,7 @@ async def clear_workspace_meta_credentials(
 async def list_all_webhook_verify_tokens(
     session: AsyncSession,
 ) -> list[str]:
-    await _ensure_meta_credentials_columns(session)
+
     stmt = select(MetaCredential.webhook_verify_token).where(
         MetaCredential.webhook_verify_token.isnot(None)
     )
@@ -183,7 +171,7 @@ async def list_all_webhook_verify_tokens(
 async def list_all_app_secrets(
     session: AsyncSession,
 ) -> list[str]:
-    await _ensure_meta_credentials_columns(session)
+
     stmt = select(MetaCredential.app_secret).where(
         MetaCredential.app_secret.isnot(None)
     )

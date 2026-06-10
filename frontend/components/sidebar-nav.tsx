@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ContactRound, LayoutDashboard, Megaphone, Rocket, ShoppingBag, Workflow } from "lucide-react";
+import { ContactRound, LayoutDashboard, Megaphone, MessageSquare, Rocket, ShoppingBag, Workflow } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,11 @@ const navItems = [
         href: "/dashboard",
         label: "Dashboard",
         icon: LayoutDashboard,
+    },
+    {
+        href: "/chats",
+        label: "Inbox",
+        icon: MessageSquare,
     },
     {
         href: "/onboarding",

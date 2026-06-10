@@ -796,7 +796,22 @@ export default function CampaignBuilderPage() {
                                 ))}
                             </div>
 
-                            <Button type="submit" disabled={busy}>Save Draft Template</Button>
+                            <div className="flex gap-3 pt-2">
+                                <Button type="submit" disabled={busy}>
+                                    Save Draft Template
+                                </Button>
+                                {templateId && selectedTemplate?.status === "draft" ? (
+                                    <Button
+                                        type="button"
+                                        variant="default"
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                        disabled={busy || pendingTemplateIds.includes(templateId)}
+                                        onClick={() => handleSubmitTemplate(templateId)}
+                                    >
+                                        {pendingTemplateIds.includes(templateId) ? "Submitting..." : "Submit to Meta"}
+                                    </Button>
+                                ) : null}
+                            </div>
 
                             <div className="rounded-2xl border border-border/70 bg-slate-50 p-3 text-sm">
                                 <p className="font-semibold text-slate-900">Pre-Submission Risk Engine</p>

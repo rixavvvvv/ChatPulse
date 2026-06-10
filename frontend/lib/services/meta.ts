@@ -33,14 +33,14 @@ export type MetaPhoneNumberInfo = {
     status?: string | null;
     code_verification_status?: string | null;
     platform_type?: string | null;
-    throughput?: string | null;
+    throughput?: any | null;
 };
 
 export type MetaWabaInfo = {
     id?: string | null;
     name?: string | null;
     account_review_status?: string | null;
-    health_status?: string | null;
+    health_status?: any | null;
     ownership_type?: string | null;
     message_template_namespace?: string | null;
 };

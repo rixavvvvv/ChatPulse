@@ -233,7 +233,7 @@ export default function MetaIntegrationPage() {
 
                 <MetaStatusCard title="WABA" description="Business account overview">
                     <div className="text-sm">{waba?.name || "Unknown"}</div>
-                    <div className="text-xs text-muted-foreground">Status: {waba?.health_status || "n/a"}</div>
+                    <div className="text-xs text-muted-foreground">Status: {waba?.health_status ? (typeof waba.health_status === 'object' ? JSON.stringify(waba.health_status) : waba.health_status) : "n/a"}</div>
                     <div className="text-xs text-muted-foreground">Review: {waba?.account_review_status || "n/a"}</div>
                 </MetaStatusCard>
             </div>
@@ -290,7 +290,7 @@ export default function MetaIntegrationPage() {
                                     </div>
                                     <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                                         <div>Status: {phone.status || "n/a"}</div>
-                                        <div>Throughput: {phone.throughput || "n/a"}</div>
+                                        <div>Throughput: {phone.throughput ? (typeof phone.throughput === 'object' ? JSON.stringify(phone.throughput) : phone.throughput) : "n/a"}</div>
                                         <div>Platform: {phone.platform_type || "n/a"}</div>
                                         <div>Verification: {phone.code_verification_status || "n/a"}</div>
                                     </div>

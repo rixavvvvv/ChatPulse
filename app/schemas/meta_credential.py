@@ -40,14 +40,14 @@ class MetaPhoneNumberInfo(BaseModel):
     status: str | None = None
     code_verification_status: str | None = None
     platform_type: str | None = None
-    throughput: str | None = None
+    throughput: dict | str | None = None
 
 
 class MetaWabaInfo(BaseModel):
     id: str | None = None
     name: str | None = None
     account_review_status: str | None = None
-    health_status: str | None = None
+    health_status: dict | str | None = None
     ownership_type: str | None = None
     message_template_namespace: str | None = None
 

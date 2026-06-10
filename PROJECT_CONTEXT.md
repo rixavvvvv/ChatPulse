@@ -1,6 +1,6 @@
 # ChatPulse — Bulk Messaging Platform — Project Context
 
-> **Purpose**: This document gives any new coding agent full context of the project so it can continue work without losing progress. Last updated: 2026-05-12.
+> **Purpose**: This document gives any new coding agent full context of the project so it can continue work without losing progress. Last updated: 2026-06-10.
 
 ---
 
@@ -189,7 +189,7 @@ d:\On-going Projects\Bulk Messaging\
 ### Meta Integration
 | Table | Key Columns | Notes |
 |-------|------------|-------|
-| `meta_credentials` | id, workspace_id (UQ), phone_number_id, access_token (encrypted), business_account_id | Encrypted at rest via XOR keystream |
+| `meta_credentials` | id, workspace_id (UQ), phone_number_id, access_token (encrypted), business_account_id, app_secret (encrypted), webhook_verify_token (encrypted) | Encrypted at rest via XOR keystream. Schema migrations applied at init_db, avoiding runtime deadlocks. |
 
 ### Ecommerce / Shopify
 | Table | Key Columns | Notes |

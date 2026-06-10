@@ -289,6 +289,128 @@ async def process_meta_webhook_payload(
 
                 result.processed += 1
 
+            messages = value.get("messages")
+            if isinstance(messages, list):
+                contacts_payload = value.get("contacts", [])
+                contacts_dict = {
+                    str(c.get("wa_id")): c.get("profile", {}).get("name", "Unknown Contact")
+                    for c in contacts_payload if isinstance(c, dict)
+                }
+
+                # Find workspace_id from phone_number_id
+                metadata = value.get("metadata", {})
+                phone_number_id = metadata.get("phone_number_id")
+                if not phone_number_id:
+                    result.ignored += len(messages)
+                    continue
+
+                from app.models.meta_credential import MetaCredential
+                stmt = select(MetaCredential).where(MetaCredential.phone_number_id == str(phone_number_id))
+                cred = (await session.execute(stmt)).scalar_one_or_none()
+                if not cred:
+                    result.ignored += len(messages)
+                    continue
+                workspace_id = cred.workspace_id
+
+                from app.models.contact import Contact
+                from app.services.contact_service import create_contact
+                from app.services.conversation_message_service import create_inbound_message
+                from app.models.conversation import MessageContentType
+
+                for msg_payload in messages:
+                    if not isinstance(msg_payload, dict):
+                        result.ignored += 1
+                        continue
+                    
+                    from_phone = str(msg_payload.get("from"))
+                    msg_id = str(msg_payload.get("id"))
+                    contact_name = contacts_dict.get(from_phone, "Unknown Contact")
+                    
+                    # Ensure contact exists
+                    contact_stmt = select(Contact).where(
+                        Contact.workspace_id == workspace_id,
+                        Contact.phone == from_phone,
+                    ).order_by(Contact.id.asc()).limit(1)
+                    contact = (await session.execute(contact_stmt)).scalar_one_or_none()
+                    
+                    if not contact:
+                        contact = await create_contact(session, workspace_id, contact_name, from_phone)
+
+                    # Parse message content
+                    msg_type = msg_payload.get("type", "text")
+                    content = ""
+                    content_type = MessageContentType.text
+
+                    if msg_type == "text":
+                        content = msg_payload.get("text", {}).get("body", "")
+                    elif msg_type == "image":
+                        content = "[Image]"
+                        content_type = MessageContentType.image
+                    elif msg_type == "document":
+                        content = "[Document]"
+                        content_type = MessageContentType.document
+                    elif msg_type == "video":
+                        content = "[Video]"
+                        content_type = MessageContentType.video
+                    elif msg_type == "audio":
+                        content = "[Audio]"
+                        content_type = MessageContentType.audio
+                    elif msg_type == "location":
+                        content = "[Location]"
+                        content_type = MessageContentType.location
+                    elif msg_type == "interactive":
+                        # Button reply or list reply
+                        interactive = msg_payload.get("interactive", {})
+                        if interactive.get("type") == "button_reply":
+                            content = interactive.get("button_reply", {}).get("title", "[Button]")
+                        elif interactive.get("type") == "list_reply":
+                            content = interactive.get("list_reply", {}).get("title", "[List]")
+                        else:
+                            content = "[Interactive]"
+                        content_type = MessageContentType.interactive
+                    else:
+                        content = f"[{msg_type.capitalize()}]"
+
+                    # Create inbound message and conversation
+                    message, conversation = await create_inbound_message(
+                        db=session,
+                        workspace_id=workspace_id,
+                        contact_id=contact.id,
+                        content=content,
+                        content_type=content_type,
+                        provider_message_id=msg_id,
+                        metadata_json=msg_payload,
+                    )
+                    
+                    result.domain_events.append(
+                        (
+                            "whatsapp.message_received",
+                            workspace_id,
+                            {"contact_id": contact.id, "provider_message_id": msg_id, "type": msg_type},
+                            f"inbound:{msg_id}",
+                        )
+                    )
+                    
+                    # Notify via WebSockets
+                    from app.services.websocket_manager import get_distributed_manager
+                    from app.services.redis_pubsub_manager import get_conversation_channel, get_workspace_channel
+                    manager = get_distributed_manager()
+                    
+                    event = {
+                        "event_type": "message.created",
+                        "conversation_id": conversation.id,
+                        "message": {
+                            "id": message.id,
+                            "content": message.content,
+                            "direction": message.direction.value,
+                            "created_at": message.created_at.isoformat() if message.created_at else None,
+                        }
+                    }
+                    await manager.broadcast_to_room(get_conversation_channel(conversation.id), event)
+                    await manager.broadcast_to_room(get_workspace_channel(workspace_id), event)
+                    
+                    result.processed += 1
+
     for workspace_id, campaign_id in impacted_campaigns:
         await _refresh_campaign_aggregates(
             session=session,
